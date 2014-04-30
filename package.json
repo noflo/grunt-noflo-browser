@@ -42,6 +42,7 @@
   ],
   "dependencies": {
     "component-builder": "0.10.x",
+    "component-package": "git://github.com/bergie/package.js.git#patch-1",
     "component-installer": "0.0.8",
     "component-json": "git://github.com/bergie/component-json.git",
     "component-coffee": "^0.1.4",
