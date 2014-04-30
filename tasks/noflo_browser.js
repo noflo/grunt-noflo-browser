@@ -18,14 +18,13 @@ module.exports = function(grunt) {
     var options = this.options({
       require: true,
       development: false,
+      concurrency: 10,
       plugins: [
         'component-json',
         'component-coffee',
         'component-fbp'
       ],
-      remotes: [
-        'https://raw.githubusercontent.com'
-      ]
+      remotes: []
     });
 
     // Force task to async mode
@@ -76,6 +75,7 @@ module.exports = function(grunt) {
         var manifestDir =  path.resolve(process.cwd(), path.dirname(manifestPath));
 
         var installer = new Installer(manifestDir);
+        installer.concurrency(options.concurrency);
         installer.destination(path.resolve(manifestDir, 'components/'));
 
         options.remotes.forEach(function (remote) {
