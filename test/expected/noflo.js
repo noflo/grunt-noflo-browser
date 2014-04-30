@@ -11768,7 +11768,51 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/CreateObject.js", function(exports, require, module){
+var CreateObject, noflo,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
+noflo = require('noflo');
+
+CreateObject = (function(_super) {
+  __extends(CreateObject, _super);
+
+  function CreateObject() {
+    this.inPorts = {
+      start: new noflo.Port('bang')
+    };
+    this.outPorts = {
+      out: new noflo.Port('object')
+    };
+    this.inPorts.start.on('begingroup', (function(_this) {
+      return function(group) {
+        return _this.outPorts.out.beginGroup(group);
+      };
+    })(this));
+    this.inPorts.start.on("data", (function(_this) {
+      return function() {
+        return _this.outPorts.out.send({});
+      };
+    })(this));
+    this.inPorts.start.on('endgroup', (function(_this) {
+      return function() {
+        return _this.outPorts.out.endGroup();
+      };
+    })(this));
+    this.inPorts.start.on('disconnect', (function(_this) {
+      return function() {
+        return _this.outPorts.out.disconnect();
+      };
+    })(this));
+  }
+
+  return CreateObject;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new CreateObject;
+};
 
 });
 require.register("noflo-noflo-objects/components/CreateDate.js", function(exports, require, module){
@@ -12043,6 +12087,7 @@ require.register("noflo-noflo-math/index.js", function(exports, require, module)
  * The library features can be made available as CommonJS modules that the
  * components in this project utilize.
  */
+
 
 });
 require.register("noflo-noflo-math/component.json", function(exports, require, module){
