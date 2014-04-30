@@ -25,27 +25,24 @@ module.exports = function(grunt) {
 
     // Before generating any new files, remove any previously-created files.
     clean: {
-      tests: ['tmp'],
+      tests: ['tmp', 'test/fixtures/components/*/'],
+    },
+
+    noflo_manifest: {
+      update: {
+        files: {
+          'test/fixtures/component.json': ['test/fixtures/components/*', 'test/fixtures/graphs/*']
+        }
+      }
     },
 
     // Configuration to be run (and then tested).
     noflo_browser: {
-      default_options: {
-        options: {
-        },
+      build: {
         files: {
-          'tmp/default_options': ['test/fixtures/testing', 'test/fixtures/123'],
-        },
-      },
-      custom_options: {
-        options: {
-          separator: ': ',
-          punctuation: ' !!!',
-        },
-        files: {
-          'tmp/custom_options': ['test/fixtures/testing', 'test/fixtures/123'],
-        },
-      },
+          'tmp/noflo.js': ['test/fixtures/component.json']
+        }
+      }
     },
 
     // Unit tests.
@@ -59,13 +56,14 @@ module.exports = function(grunt) {
   grunt.loadTasks('tasks');
 
   // These plugins provide necessary tasks.
+  grunt.loadNpmTasks('grunt-noflo-manifest');
   grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-contrib-nodeunit');
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'noflo_browser', 'nodeunit']);
+  grunt.registerTask('test', ['clean', 'noflo_manifest', 'noflo_browser', 'nodeunit']);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test']);

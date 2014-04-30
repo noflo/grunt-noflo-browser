@@ -1,0 +1,34 @@
+{
+  "name": "bar",
+  "repo": "foo/bar",
+  "description": "Test project",
+  "version": "0.0.1",
+  "keywords": [],
+  "dependencies": {
+    "noflo/noflo": "*",
+    "noflo/noflo-dom": "*",
+    "noflo/noflo-core": "*",
+    "noflo/noflo-css": "*",
+    "noflo/noflo-objects": "*",
+    "noflo/noflo-math": "*"
+  },
+  "development": {},
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": [
+    "index.js",
+    "graphs/InputExample.json",
+    "graphs/Clock.json"
+  ],
+  "json": [
+    "component.json",
+    "graphs/InputExample.json",
+    "graphs/Clock.json"
+  ],
+  "noflo": {
+    "graphs": {
+      "Clock": "graphs/Clock.json",
+      "InputExample": "graphs/InputExample.json"
+    }
+  }
+}

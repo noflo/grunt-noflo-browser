@@ -31,7 +31,8 @@
     "grunt-contrib-jshint": "^0.9.2",
     "grunt-contrib-clean": "^0.5.0",
     "grunt-contrib-nodeunit": "^0.3.3",
-    "grunt": "~0.4.1"
+    "grunt": "~0.4.1",
+    "grunt-noflo-manifest": "^0.1.4"
   },
   "peerDependencies": {
     "grunt": "~0.4.1"
@@ -40,7 +41,10 @@
     "gruntplugin"
   ],
   "dependencies": {
-    "component-builder": "^1.1.5",
-    "builder-coffee-script": "^0.1.1"
+    "component-builder": "0.10.x",
+    "component-installer": "0.0.8",
+    "component-json": "git://github.com/bergie/component-json.git",
+    "component-coffee": "^0.1.4",
+    "component-fbp": "^0.1.0"
   }
 }
