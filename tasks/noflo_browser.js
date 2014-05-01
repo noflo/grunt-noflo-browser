@@ -119,6 +119,7 @@ module.exports = function(grunt) {
           }
 
           var builder = new Builder(manifestDir); 
+          builder.copyAssetsTo(path.resolve(process.cwd(), path.dirname(f.dest)));
 
           // Load plugins
           options.plugins.forEach(function (plugin) {
