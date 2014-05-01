@@ -18,7 +18,8 @@
   "scripts": [
     "index.js",
     "graphs/InputExample.json",
-    "graphs/Clock.json"
+    "graphs/Clock.json",
+    "graphs/SendJson.fbp"
   ],
   "json": [
     "component.json",
@@ -28,7 +29,11 @@
   "noflo": {
     "graphs": {
       "Clock": "graphs/Clock.json",
-      "InputExample": "graphs/InputExample.json"
+      "InputExample": "graphs/InputExample.json",
+      "SendJson": "graphs/SendJson.fbp"
     }
-  }
+  },
+  "fbp": [
+    "graphs/SendJson.fbp"
+  ]
 }

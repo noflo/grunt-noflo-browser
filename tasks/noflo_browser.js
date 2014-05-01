@@ -37,6 +37,9 @@ module.exports = function(grunt) {
         return;
       }
       Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
+        if (path.extname(manifest.noflo.graphs[graphName]) !== '.json') {
+          return;
+        }
         var graph = grunt.file.readJSON(path.resolve(srcDir, manifest.noflo.graphs[graphName]));
         if (!graph.properties.environment || !graph.properties.environment.type || graph.properties.environment.type !== 'noflo-browser') {
           return;
