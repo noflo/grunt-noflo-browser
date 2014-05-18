@@ -3255,7 +3255,7 @@ module.exports = (function(){
 })();
 });
 require.register("noflo-noflo/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.0","dependencies":{"component/emitter":"*","component/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
+module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.2","dependencies":{"component/emitter":"*","component/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
 });
 require.register("noflo-noflo/src/lib/Graph.js", function(exports, require, module){
 var EventEmitter, Graph, clone, platform,
@@ -4453,7 +4453,7 @@ if (!require('./Platform').isBrowser()) {
   EventEmitter = require('emitter');
 }
 
-validTypes = ['all', 'string', 'number', 'int', 'object', 'array', 'boolean', 'color', 'date', 'bang'];
+validTypes = ['all', 'string', 'number', 'int', 'object', 'array', 'boolean', 'color', 'date', 'bang', 'function'];
 
 BasePort = (function(_super) {
   __extends(BasePort, _super);
@@ -4475,8 +4475,11 @@ BasePort = (function(_super) {
     if (options.required === void 0) {
       options.required = true;
     }
+    if (options.datatype === 'integer') {
+      options.datatype = 'int';
+    }
     if (validTypes.indexOf(options.datatype) === -1) {
-      throw new Error("Invalid port datatype '" + options.datatype + "' specified, valid are " + (validTypes.join(' ,')));
+      throw new Error("Invalid port datatype '" + options.datatype + "' specified, valid are " + (validTypes.join(', ')));
     }
     if (options.type && options.type.indexOf('/') === -1) {
       throw new Error("Invalid port type '" + options.type + "' specified. Should be URL or MIME type");
@@ -5069,6 +5072,9 @@ Port = (function(_super) {
     this.type = type;
     if (!this.type) {
       this.type = 'all';
+    }
+    if (this.type === 'integer') {
+      this.type = 'int';
     }
     this.sockets = [];
     this.from = null;
@@ -6135,7 +6141,7 @@ ComponentLoader = (function(_super) {
     if (!this.ready) {
       this.listComponents((function(_this) {
         return function() {
-          return _this.getSource(packageId, name, callback);
+          return _this.getSource(name, callback);
         };
       })(this));
       return;
@@ -7863,7 +7869,7 @@ require.register("noflo-noflo-dom/index.js", function(exports, require, module){
 
 });
 require.register("noflo-noflo-dom/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-dom","description":"Document Object Model components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-dom","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/AddClass.js","components/AppendChild.js","components/CreateElement.js","components/CreateFragment.js","components/GetAttribute.js","components/GetElement.js","components/HasClass.js","components/Listen.js","components/ReadHtml.js","components/RemoveElement.js","components/SetAttribute.js","components/WriteHtml.js","components/RemoveClass.js","components/RequestAnimationFrame.js","index.js"],"json":["component.json"],"noflo":{"icon":"html5","components":{"AddClass":"components/AddClass.js","AppendChild":"components/AppendChild.js","CreateElement":"components/CreateElement.js","CreateFragment":"components/CreateFragment.js","GetAttribute":"components/GetAttribute.js","GetElement":"components/GetElement.js","HasClass":"components/HasClass.js","Listen":"components/Listen.js","WriteHtml":"components/WriteHtml.js","ReadHtml":"components/ReadHtml.js","RemoveElement":"components/RemoveElement.js","SetAttribute":"components/SetAttribute.js","RemoveClass":"components/RemoveClass.js","RequestAnimationFrame":"components/RequestAnimationFrame.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-dom","description":"Document Object Model components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-dom","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/AddClass.js","components/AppendChild.js","components/CreateElement.js","components/CreateFragment.js","components/GetAttribute.js","components/GetElement.js","components/HasClass.js","components/Listen.js","components/ReadHtml.js","components/RemoveElement.js","components/SetAttribute.js","components/WriteHtml.js","components/RemoveClass.js","components/RequestAnimationFrame.js","index.js"],"json":["component.json"],"noflo":{"icon":"html5","components":{"AddClass":"components/AddClass.js","AppendChild":"components/AppendChild.js","CreateElement":"components/CreateElement.js","CreateFragment":"components/CreateFragment.js","GetAttribute":"components/GetAttribute.js","GetElement":"components/GetElement.js","HasClass":"components/HasClass.js","Listen":"components/Listen.js","ReadHtml":"components/ReadHtml.js","RemoveClass":"components/RemoveClass.js","RemoveElement":"components/RemoveElement.js","RequestAnimationFrame":"components/RequestAnimationFrame.js","SetAttribute":"components/SetAttribute.js","WriteHtml":"components/WriteHtml.js"}}}');
 });
 require.register("noflo-noflo-dom/components/AddClass.js", function(exports, require, module){
 var AddClass, noflo,
@@ -8699,7 +8705,7 @@ require.register("noflo-noflo-core/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-core/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.0","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","component/underscore":"*"},"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","Merge":"components/Merge.js","Output":"components/Output.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","SendNext":"components/SendNext.js","Split":"components/Split.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","MakeFunction":"components/MakeFunction.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.0","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","component/underscore":"*"},"remotes":["https://raw.githubusercontent.com"],"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","MakeFunction":"components/MakeFunction.js","Merge":"components/Merge.js","Output":"components/Output.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","SendNext":"components/SendNext.js","Split":"components/Split.js"}}}');
 });
 require.register("noflo-noflo-core/components/Callback.js", function(exports, require, module){
 var Callback, noflo, _,
@@ -8719,13 +8725,21 @@ Callback = (function(_super) {
 
   function Callback() {
     this.callback = null;
-    this.inPorts = {
-      "in": new noflo.Port('all'),
-      callback: new noflo.Port('function')
-    };
-    this.outPorts = {
-      error: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        description: 'Object passed as argument of the callback',
+        datatype: 'all'
+      },
+      callback: {
+        description: 'Callback to invoke',
+        datatype: 'function'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      error: {
+        datatype: 'object'
+      }
+    });
     this.inPorts.callback.on('data', (function(_this) {
       return function(data) {
         if (!_.isFunction(data)) {
@@ -8779,12 +8793,17 @@ DisconnectAfterPacket = (function(_super) {
   DisconnectAfterPacket.prototype.icon = 'pause';
 
   function DisconnectAfterPacket() {
-    this.inPorts = {
-      "in": new noflo.Port('all')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be forward with disconnection'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -8827,10 +8846,13 @@ Drop = (function(_super) {
   Drop.prototype.icon = 'trash-o';
 
   function Drop() {
-    this.inPorts = {
-      "in": new noflo.ArrayPort('all')
-    };
-    this.outPorts = {};
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatypes: 'all',
+        description: 'Packet to be dropped'
+      }
+    });
+    this.outPorts = new noflo.OutPorts;
   }
 
   return Drop;
@@ -8860,14 +8882,26 @@ Group = (function(_super) {
     this.groups = [];
     this.newGroups = [];
     this.threshold = null;
-    this.inPorts = {
-      "in": new noflo.ArrayPort('all'),
-      group: new noflo.ArrayPort('string'),
-      threshold: new noflo.Port('integer')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all'
+      },
+      group: {
+        datatype: 'string',
+        description: 'The group to add around forwarded packets'
+      },
+      threshold: {
+        datatype: 'int',
+        description: 'Maximum number of groups kept around',
+        required: false
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        required: false
+      }
+    });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
         var group, _i, _len, _ref, _results;
@@ -8955,13 +8989,21 @@ Kick = (function(_super) {
       group: []
     };
     this.groups = [];
-    this.inPorts = {
-      "in": new noflo.Port('bang'),
-      data: new noflo.Port('all')
-    };
-    this.outPorts = {
-      out: new noflo.ArrayPort('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'bang',
+        description: 'Signal to send the data packet'
+      },
+      data: {
+        datatype: 'all',
+        description: 'Packet to be sent'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.groups.push(group);
@@ -9030,12 +9072,17 @@ Merge = (function(_super) {
   Merge.prototype.icon = 'compress';
 
   function Merge() {
-    this.inPorts = {
-      "in": new noflo.ArrayPort('all')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be forwarded'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
         return _this.outPorts.out.connect();
@@ -9106,13 +9153,21 @@ Output = (function(_super) {
 
   function Output() {
     this.options = null;
-    this.inPorts = {
-      "in": new noflo.ArrayPort('all'),
-      options: new noflo.Port('object')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be printed through console.log'
+      },
+      options: {
+        datatype: 'object',
+        description: 'Options to be passed to console.log'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
         _this.log(data);
@@ -9184,12 +9239,17 @@ Repeat = (function(_super) {
   Repeat.prototype.icon = 'forward';
 
   function Repeat() {
-    this.inPorts = {
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be forwarded'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
         return _this.outPorts.out.connect();
@@ -9242,12 +9302,16 @@ RepeatAsync = (function(_super) {
 
   function RepeatAsync() {
     this.groups = [];
-    this.inPorts = {
-      "in": new noflo.Port('all')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.groups.push(group);
@@ -9457,12 +9521,17 @@ Split = (function(_super) {
   Split.prototype.icon = 'expand';
 
   function Split() {
-    this.inPorts = {
-      "in": new noflo.Port('all')
-    };
-    this.outPorts = {
-      out: new noflo.ArrayPort('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be forwarded'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
         return _this.outPorts.out.connect();
@@ -9516,14 +9585,25 @@ RunInterval = (function(_super) {
   function RunInterval() {
     this.timer = null;
     this.interval = null;
-    this.inPorts = {
-      interval: new noflo.Port('number'),
-      start: new noflo.Port('bang'),
-      stop: new noflo.Port('bang')
-    };
-    this.outPorts = {
-      out: new noflo.Port('bang')
-    };
+    this.inPorts = new noflo.InPorts({
+      interval: {
+        datatype: 'number',
+        description: 'Interval at which output packets are emitted (ms)'
+      },
+      start: {
+        datatype: 'bang',
+        description: 'Start the emission'
+      },
+      stop: {
+        datatype: 'bang',
+        description: 'Stop the emission'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'bang'
+      }
+    });
     this.inPorts.interval.on('data', (function(_this) {
       return function(interval) {
         _this.interval = interval;
@@ -9594,14 +9674,26 @@ RunTimeout = (function(_super) {
   function RunTimeout() {
     this.timer = null;
     this.time = null;
-    this.inPorts = {
-      time: new noflo.Port('number'),
-      start: new noflo.Port('bang'),
-      clear: new noflo.Port('bang')
-    };
-    this.outPorts = {
-      out: new noflo.Port('bang')
-    };
+    this.inPorts = new noflo.InPorts({
+      time: {
+        datatype: 'number',
+        description: 'Time after which a packet will be sent'
+      },
+      start: {
+        datatype: 'bang',
+        description: 'Start the timeout before sending a packet'
+      },
+      clear: {
+        datatype: 'bang',
+        description: 'Clear the timeout',
+        required: false
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'bang'
+      }
+    });
     this.inPorts.time.on('data', (function(_this) {
       return function(time) {
         _this.time = time;
@@ -9676,15 +9768,27 @@ MakeFunction = (function(_super) {
 
   function MakeFunction() {
     this.f = null;
-    this.inPorts = {
-      "in": new noflo.Port('all'),
-      "function": new noflo.Port('string')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all'),
-      "function": new noflo.Port('function'),
-      error: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Packet to be processed'
+      },
+      "function": {
+        datatype: 'string',
+        description: 'Function to evaluate'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      },
+      "function": {
+        datatype: 'function'
+      },
+      error: {
+        datatype: 'object'
+      }
+    });
     this.inPorts["function"].on('data', (function(_this) {
       return function(data) {
         var error;
@@ -9937,7 +10041,7 @@ require.register("noflo-noflo-objects/index.js", function(exports, require, modu
 
 });
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.0","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","component/underscore":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","component/underscore":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
 });
 require.register("noflo-noflo-objects/components/Extend.js", function(exports, require, module){
 var Extend, noflo, _,
@@ -9958,15 +10062,30 @@ Extend = (function(_super) {
     this.mergedBase = {};
     this.key = null;
     this.reverse = false;
-    this.inPorts = {
-      "in": new noflo.Port,
-      base: new noflo.Port,
-      key: new noflo.Port,
-      reverse: new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to extend'
+      },
+      base: {
+        datatype: 'object',
+        description: 'Objects to extend with (one object per IP)'
+      },
+      key: {
+        datatype: 'string',
+        description: 'Property name to extend with'
+      },
+      reverse: {
+        datatype: 'string',
+        description: 'A string equal "true" if you want to reverse the order of extension algorithm'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'The object received on port "in" extended'
+      }
+    });
     this.inPorts.base.on("connect", (function(_this) {
       return function() {
         return _this.bases = [];
@@ -10052,12 +10171,18 @@ MergeObjects = (function(_super) {
 
   function MergeObjects() {
     this.merge = _.bind(this.merge, this);
-    this.inPorts = {
-      "in": new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Objects to merge (one per IP)'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'A new object containing the merge of input objects'
+      }
+    });
     this.inPorts["in"].on("connect", (function(_this) {
       return function() {
         _this.groups = [];
@@ -10132,12 +10257,18 @@ SplitObject = (function(_super) {
   SplitObject.prototype.description = "splits a single object into multiple IPs, wrapped with the key as the group";
 
   function SplitObject() {
-    this.inPorts = {
-      "in": new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to split key/values from'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Values from the input object (one value per IP and its key sent as group)'
+      }
+    });
     this.inPorts["in"].on("begingroup", (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -10191,13 +10322,21 @@ ReplaceKey = (function(_super) {
 
   function ReplaceKey() {
     this.patterns = {};
-    this.inPorts = {
-      "in": new noflo.Port,
-      pattern: new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to replace a key from'
+      },
+      pattern: {
+        datatype: 'all'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object forwared from input'
+      }
+    });
     this.inPorts.pattern.on("data", (function(_this) {
       return function(patterns) {
         _this.patterns = patterns;
@@ -10265,12 +10404,18 @@ Keys = (function(_super) {
   Keys.prototype.description = "gets only the keys of an object and forward them as an array";
 
   function Keys() {
-    this.inPorts = {
-      "in": new noflo.Port('object')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to get keys from'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'string',
+        description: 'Keys from the incoming object (one per IP)'
+      }
+    });
     this.inPorts["in"].on("begingroup", (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -10324,12 +10469,18 @@ Size = (function(_super) {
   Size.prototype.description = "gets the size of an object and sends that out as a number";
 
   function Size() {
-    this.inPorts = {
-      "in": new noflo.Port('object')
-    };
-    this.outPorts = {
-      out: new noflo.Port('integer')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to measure the size of'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'int',
+        description: 'Size of the input object'
+      }
+    });
     this.inPorts["in"].on("begingroup", (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -10376,12 +10527,18 @@ Values = (function(_super) {
   Values.prototype.description = "gets only the values of an object and forward them as an array";
 
   function Values() {
-    this.inPorts = {
-      "in": new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Object to extract values from'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Values extracted from the input object (one value per IP)'
+      }
+    });
     this.inPorts["in"].on("begingroup", (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -10436,13 +10593,22 @@ Join = (function(_super) {
 
   function Join() {
     this.delimiter = ",";
-    this.inPorts = {
-      "in": new noflo.Port,
-      delimiter: new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to join values from'
+      },
+      delimiter: {
+        datatype: 'string',
+        description: 'Delimiter to join values'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'string',
+        description: 'String conversion of all values joined with delimiter into one string'
+      }
+    });
     this.inPorts.delimiter.on("data", (function(_this) {
       return function(delimiter) {
         _this.delimiter = delimiter;
@@ -10496,13 +10662,22 @@ ExtractProperty = (function(_super) {
   ExtractProperty.prototype.description = "Given a key, return only the value matching that key in the incoming object";
 
   function ExtractProperty() {
-    this.inPorts = {
-      "in": new noflo.Port,
-      key: new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'An object to extract property from'
+      },
+      key: {
+        datatype: 'string',
+        description: 'Property names to extract (one property per IP)'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Values of the property extracted (each value sent as a separate IP)'
+      }
+    });
     this.inPorts.key.on("connect", (function(_this) {
       return function() {
         return _this.keys = [];
@@ -10569,13 +10744,22 @@ InsertProperty = (function(_super) {
 
   function InsertProperty() {
     this.properties = {};
-    this.inPorts = {
-      "in": new noflo.Port,
-      property: new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to insert property into'
+      },
+      property: {
+        datatype: 'all',
+        description: 'Property to insert (property sent as group, value sent as IP)'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object received as input with added properties'
+      }
+    });
     this.inPorts.property.on("connect", (function(_this) {
       return function() {
         return _this.properties = {};
@@ -10651,14 +10835,28 @@ SliceArray = (function(_super) {
   function SliceArray() {
     this.begin = 0;
     this.end = null;
-    this.inPorts = {
-      "in": new noflo.Port(),
-      begin: new noflo.Port(),
-      end: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'array',
+        description: 'Array to slice'
+      },
+      begin: {
+        datatype: 'number',
+        description: 'Beginning of the slicing'
+      },
+      end: {
+        datatype: 'number',
+        description: 'End of the slicing'
+      }
+    });
     this.outPorts = {
-      out: new noflo.Port(),
-      error: new noflo.Port()
+      out: {
+        datatype: 'array',
+        description: 'Result of the slice operation'
+      },
+      error: {
+        datatype: 'string'
+      }
     };
     this.inPorts.begin.on('data', (function(_this) {
       return function(data) {
@@ -10726,12 +10924,16 @@ SplitArray = (function(_super) {
   __extends(SplitArray, _super);
 
   function SplitArray() {
-    this.inPorts = {
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.ArrayPort()
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -10793,15 +10995,30 @@ FilterPropertyValue = (function(_super) {
   function FilterPropertyValue() {
     this.accepts = {};
     this.regexps = {};
-    this.inPorts = {
-      accept: new noflo.ArrayPort('all'),
-      regexp: new noflo.ArrayPort('string'),
-      "in": new noflo.Port('object')
-    };
-    this.outPorts = {
-      out: new noflo.Port('object'),
-      missed: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      accept: {
+        datatype: 'all',
+        description: ''
+      },
+      regexp: {
+        datatype: 'string',
+        description: ''
+      },
+      "in": {
+        datatype: 'object',
+        description: 'Object to filter properties from'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object including the filtered properties'
+      },
+      missed: {
+        datatype: 'object',
+        description: 'Object received as input if no key have been matched'
+      }
+    });
     this.inPorts.accept.on('data', (function(_this) {
       return function(data) {
         return _this.prepareAccept(data);
@@ -10920,13 +11137,20 @@ FlattenObject = (function(_super) {
 
   function FlattenObject() {
     this.map = {};
-    this.inPorts = {
-      map: new noflo.ArrayPort(),
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      map: {
+        datatype: 'all'
+      },
+      "in": {
+        datatype: 'object',
+        description: 'Object to flatten'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'array'
+      }
+    });
     this.inPorts.map.on('data', (function(_this) {
       return function(data) {
         return _this.prepareMap(data);
@@ -11026,14 +11250,22 @@ MapProperty = (function(_super) {
   function MapProperty() {
     this.map = {};
     this.regexps = {};
-    this.inPorts = {
-      map: new noflo.ArrayPort(),
-      regexp: new noflo.ArrayPort(),
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      map: {
+        datatype: 'all'
+      },
+      regexp: {
+        datatype: 'string'
+      },
+      "in": {
+        datatype: 'object'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object'
+      }
+    });
     this.inPorts.map.on('data', (function(_this) {
       return function(data) {
         return _this.prepareMap(data);
@@ -11138,13 +11370,22 @@ RemoveProperty = (function(_super) {
 
   function RemoveProperty() {
     this.properties = [];
-    this.inPorts = {
-      "in": new noflo.Port(),
-      property: new noflo.ArrayPort()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to remove properties from'
+      },
+      property: {
+        datatype: 'string',
+        description: 'Properties to remove (one per IP)'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object forwarded from input'
+      }
+    });
     this.inPorts.property.on('data', (function(_this) {
       return function(data) {
         return _this.properties.push(data);
@@ -11207,14 +11448,22 @@ MapPropertyValue = (function(_super) {
     this.map = {};
     this.regexpAny = {};
     this.regexp = {};
-    this.inPorts = {
-      map: new noflo.ArrayPort(),
-      regexp: new noflo.ArrayPort(),
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      map: {
+        datatype: 'all'
+      },
+      regexp: {
+        datatype: 'string'
+      },
+      "in": {
+        datatype: 'object'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object'
+      }
+    });
     this.inPorts.map.on('data', (function(_this) {
       return function(data) {
         return _this.prepareMap(data);
@@ -11333,16 +11582,34 @@ GetObjectKey = (function(_super) {
     this.sendGroup = true;
     this.data = [];
     this.key = [];
-    this.inPorts = {
-      "in": new noflo.Port('object'),
-      key: new noflo.ArrayPort('string'),
-      sendgroup: new noflo.Port('boolean')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all'),
-      object: new noflo.Port('object'),
-      missed: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to get keys from'
+      },
+      key: {
+        datatype: 'string',
+        description: 'Keys to extract from the object (one key per IP)'
+      },
+      sendgroup: {
+        datatype: 'boolean',
+        description: 'true to send keys as groups around value IPs, false otherwise'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Values extracts from the input object given the input keys (one value per IP, potentially grouped using the key names)'
+      },
+      object: {
+        datatype: 'object',
+        description: 'Object forwarded from input if at least one property matches the input keys'
+      },
+      missed: {
+        datatype: 'object',
+        description: 'Object forwarded from input if no property matches the input keys'
+      }
+    });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
         return _this.data = [];
@@ -11478,12 +11745,18 @@ UniqueArray = (function(_super) {
   __extends(UniqueArray, _super);
 
   function UniqueArray() {
-    this.inPorts = {
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'array',
+        description: 'Array to get unique values from'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'array',
+        description: 'Array containing only unique values from the input array'
+      }
+    });
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
         return _this.outPorts.out.send(_this.unique(data));
@@ -11531,13 +11804,21 @@ SetProperty = (function(_super) {
 
   function SetProperty() {
     this.properties = {};
-    this.inPorts = {
-      property: new noflo.ArrayPort(),
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      property: {
+        datatype: 'all'
+      },
+      "in": {
+        datatype: 'object',
+        description: 'Object to set property on'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object forwared from input'
+      }
+    });
     this.inPorts.property.on('data', (function(_this) {
       return function(data) {
         return _this.setProperty(data);
@@ -11607,12 +11888,18 @@ SimplifyObject = (function(_super) {
   __extends(SimplifyObject, _super);
 
   function SimplifyObject() {
-    this.inPorts = {
-      "in": new noflo.Port
-    };
-    this.outPorts = {
-      out: new noflo.Port
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'all',
+        description: 'Object to simplify'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Simplified object'
+      }
+    });
     this.inPorts["in"].on('beginGroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -11685,14 +11972,22 @@ DuplicateProperty = (function(_super) {
   function DuplicateProperty() {
     this.properties = {};
     this.separator = '/';
-    this.inPorts = {
-      property: new noflo.ArrayPort(),
-      separator: new noflo.Port(),
-      "in": new noflo.Port()
-    };
-    this.outPorts = {
-      out: new noflo.Port()
-    };
+    this.inPorts = new noflo.InPorts({
+      property: {
+        datatype: 'all'
+      },
+      separator: {
+        datatype: 'string'
+      },
+      "in": {
+        datatype: 'object'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object'
+      }
+    });
     this.inPorts.property.on('data', (function(_this) {
       return function(data) {
         return _this.setProperty(data);
@@ -11778,12 +12073,18 @@ CreateObject = (function(_super) {
   __extends(CreateObject, _super);
 
   function CreateObject() {
-    this.inPorts = {
-      start: new noflo.Port('bang')
-    };
-    this.outPorts = {
-      out: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      start: {
+        datatype: 'bang',
+        description: 'Signal to create a new object'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'A new empty object'
+      }
+    });
     this.inPorts.start.on('begingroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -11830,12 +12131,18 @@ CreateDate = (function(_super) {
   CreateDate.prototype.icon = 'clock-o';
 
   function CreateDate() {
-    this.inPorts = {
-      "in": new noflo.Port('string')
-    };
-    this.outPorts = {
-      out: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'string',
+        description: 'A string representation of a date in RFC2822/IETF/ISO8601 format'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'A new Date object'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -11889,15 +12196,30 @@ SetPropertyValue = (function(_super) {
     this.data = [];
     this.groups = [];
     this.keep = false;
-    this.inPorts = {
-      property: new noflo.Port('string'),
-      value: new noflo.Port('all'),
-      "in": new noflo.Port('object'),
-      keep: new noflo.Port('boolean')
-    };
-    this.outPorts = {
-      out: new noflo.Port('object')
-    };
+    this.inPorts = new noflo.InPorts({
+      property: {
+        datatype: 'string',
+        description: 'Property name to set value on'
+      },
+      value: {
+        datatype: 'all',
+        description: 'Property value to set'
+      },
+      "in": {
+        datatype: 'object',
+        description: 'Object to set property value on'
+      },
+      keep: {
+        datatype: 'boolean',
+        description: 'true if input value must be kept around, false to drop it after the value is set'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object',
+        description: 'Object forwarded from the input'
+      }
+    });
     this.inPorts.keep.on('data', (function(_this) {
       return function(keep) {
         return _this.keep = String(keep) === 'true';
@@ -11906,7 +12228,7 @@ SetPropertyValue = (function(_super) {
     this.inPorts.property.on('data', (function(_this) {
       return function(data) {
         _this.property = data;
-        if (_this.value && _this.data.length) {
+        if (_this.value !== void 0 && _this.data.length) {
           return _this.addProperties();
         }
       };
@@ -11926,7 +12248,7 @@ SetPropertyValue = (function(_super) {
     })(this));
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
-        if (_this.property && _this.value) {
+        if (_this.property && _this.value !== void 0) {
           _this.addProperty({
             data: data,
             group: _this.groups.slice(0)
@@ -11946,11 +12268,11 @@ SetPropertyValue = (function(_super) {
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function() {
-        if (_this.property && _this.value) {
+        if (_this.property && _this.value !== void 0) {
           _this.outPorts.out.disconnect();
         }
         if (!_this.keep) {
-          return _this.value = null;
+          return delete _this.value;
         }
       };
     })(this));
@@ -12011,15 +12333,29 @@ CallMethod = (function(_super) {
   function CallMethod() {
     this.method = null;
     this.args = [];
-    this.inPorts = {
-      "in": new noflo.Port('object'),
-      method: new noflo.Port('string'),
-      "arguments": new noflo.Port('all')
-    };
-    this.outPorts = {
-      out: new noflo.Port('all'),
-      error: new noflo.Port('string')
-    };
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object on which a method will be called'
+      },
+      method: {
+        datatype: 'string',
+        description: 'Name of the method to call'
+      },
+      "arguments": {
+        datatype: 'all',
+        description: 'Arguments given to the method (one argument per IP)'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'all',
+        description: 'Value returned by the method call'
+      },
+      error: {
+        datatype: 'object'
+      }
+    });
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
         return _this.outPorts.out.beginGroup(group);
@@ -12090,7 +12426,7 @@ require.register("noflo-noflo-math/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-math/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Add.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","Multiply":"components/Multiply.js","Subtract":"components/Subtract.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Add.js","components/Ceil.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","components/Modulo.js","components/Random.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Ceil":"components/Ceil.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","Modulo":"components/Modulo.js","Multiply":"components/Multiply.js","Random":"components/Random.js","Subtract":"components/Subtract.js"}}}');
 });
 require.register("noflo-noflo-math/components/Add.js", function(exports, require, module){
 var Add, MathComponent,
@@ -12118,6 +12454,70 @@ Add = (function(_super) {
 
 exports.getComponent = function() {
   return new Add;
+};
+
+});
+require.register("noflo-noflo-math/components/Ceil.js", function(exports, require, module){
+var Ceil, noflo,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+noflo = require('noflo');
+
+Ceil = (function(_super) {
+  __extends(Ceil, _super);
+
+  Ceil.prototype.icon = 'arrow-up';
+
+  Ceil.prototype.description = 'Round a number up';
+
+  function Ceil() {
+    this.inPorts = {
+      "in": new noflo.Port('number')
+    };
+    this.outPorts = {
+      out: new noflo.Port('int')
+    };
+    this.inPorts["in"].on('begingroup', (function(_this) {
+      return function(group) {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
+        return _this.outPorts.out.beginGroup(group);
+      };
+    })(this));
+    this.inPorts["in"].on('data', (function(_this) {
+      return function(data) {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
+        return _this.outPorts.out.send(Math.ceil(data));
+      };
+    })(this));
+    this.inPorts["in"].on('endgroup', (function(_this) {
+      return function() {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
+        return _this.outPorts.out.endGroup();
+      };
+    })(this));
+    this.inPorts["in"].on('disconnect', (function(_this) {
+      return function() {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
+        return _this.outPorts.out.disconnect();
+      };
+    })(this));
+  }
+
+  return Ceil;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new Ceil;
 };
 
 });
@@ -12216,30 +12616,46 @@ noflo = require('noflo');
 Floor = (function(_super) {
   __extends(Floor, _super);
 
+  Floor.prototype.icon = 'arrow-down';
+
+  Floor.prototype.description = 'Round a number down';
+
   function Floor() {
     this.inPorts = {
       "in": new noflo.Port('number')
     };
     this.outPorts = {
-      out: new noflo.Port('integer')
+      out: new noflo.Port('int')
     };
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
         return _this.outPorts.out.beginGroup(group);
       };
     })(this));
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
         return _this.outPorts.out.send(Math.floor(data));
       };
     })(this));
     this.inPorts["in"].on('endgroup', (function(_this) {
       return function() {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
         return _this.outPorts.out.endGroup();
       };
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function() {
+        if (!_this.outPorts.out.isAttached()) {
+          return;
+        }
         return _this.outPorts.out.disconnect();
       };
     })(this));
@@ -12454,6 +12870,8 @@ noflo = require('noflo');
 CountSum = (function(_super) {
   __extends(CountSum, _super);
 
+  CountSum.prototype.description = 'Sum numbers coming from multiple inputs together';
+
   function CountSum() {
     this.portCounts = {};
     this.inPorts = {
@@ -12506,6 +12924,85 @@ exports.getComponent = function() {
 };
 
 });
+require.register("noflo-noflo-math/components/Modulo.js", function(exports, require, module){
+var Divide, MathComponent,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+MathComponent = require('../lib/MathComponent').MathComponent;
+
+Divide = (function(_super) {
+  __extends(Divide, _super);
+
+  function Divide() {
+    Divide.__super__.constructor.call(this, 'dividend', 'divisor', 'remainder');
+  }
+
+  Divide.prototype.calculate = function(dividend, divisor) {
+    return dividend % divisor;
+  };
+
+  return Divide;
+
+})(MathComponent);
+
+exports.getComponent = function() {
+  return new Divide;
+};
+
+});
+require.register("noflo-noflo-math/components/Random.js", function(exports, require, module){
+var Random, noflo,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+noflo = require('noflo');
+
+Random = (function(_super) {
+  __extends(Random, _super);
+
+  Random.prototype.icon = 'random';
+
+  Random.prototype.description = 'Generate a random number between 0 and 1';
+
+  function Random() {
+    this.inPorts = {
+      "in": new noflo.Port('bang')
+    };
+    this.outPorts = {
+      out: new noflo.Port('number')
+    };
+    this.inPorts["in"].on('begingroup', (function(_this) {
+      return function(group) {
+        return _this.outPorts.out.beginGroup(group);
+      };
+    })(this));
+    this.inPorts["in"].on('data', (function(_this) {
+      return function(data) {
+        return _this.outPorts.out.send(Math.random());
+      };
+    })(this));
+    this.inPorts["in"].on('endgroup', (function(_this) {
+      return function() {
+        return _this.outPorts.out.endGroup();
+      };
+    })(this));
+    this.inPorts["in"].on('disconnect', (function(_this) {
+      return function() {
+        return _this.outPorts.out.disconnect();
+      };
+    })(this));
+  }
+
+  return Random;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new Random;
+};
+
+});
 require.register("noflo-noflo-math/lib/MathComponent.js", function(exports, require, module){
 var MathComponent, noflo,
   __hasProp = {}.hasOwnProperty,
@@ -12542,13 +13039,15 @@ MathComponent = (function(_super) {
           group = _ref[_i];
           _this.outPorts[res].beginGroup(group);
         }
-        _this.outPorts[res].send(_this.calculate(_this.primary.value, _this.secondary));
+        if (_this.outPorts[res].isAttached()) {
+          _this.outPorts[res].send(_this.calculate(_this.primary.value, _this.secondary));
+        }
         _ref1 = _this.primary.group;
         for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
           group = _ref1[_j];
           _this.outPorts[res].endGroup();
         }
-        if (_this.primary.disconnect) {
+        if (_this.outPorts[res].isConnected() && _this.primary.disconnect) {
           return _this.outPorts[res].disconnect();
         }
       };
@@ -12632,8 +13131,100 @@ module.exports = JSON.parse('{"properties":{"name":"Clock","environment":{"type"
 require.register("bar/graphs/SendJson.fbp", function(exports, require, module){
 module.exports = JSON.parse('{"processes":{"SendString":{"component":"strings/SendString"},"ParseJson":{"component":"strings/ParseJson"}},"connections":[{"src":{"process":"SendString","port":"out"},"tgt":{"process":"ParseJson","port":"in"}}],"exports":[{"private":"sendstring.string","public":"json"},{"private":"sendstring.in","public":"in"},{"private":"parsejson.out","public":"out"}]}');
 });
+require.register("bar/graphs/Clock.js", function(exports, require, module){
+var processes = {},sockets=[],noflo=require('noflo');
+processes.getTimezoneOffset = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-objects/components/CallMethod.js').getComponent();
+processes.makeTimezoneAngle = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-math/components/Divide.js').getComponent();
+processes.fixHourAngle = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-math/components/Add.js').getComponent();
+processes.makeHourRotation = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-math/components/Divide.js').getComponent();
+processes.rotateMinuteHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-css/components/RotateElement.js').getComponent();
+processes.rotateHourHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-css/components/RotateElement.js').getComponent();
+processes.getSecondHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-dom/components/GetElement.js').getComponent();
+processes.getMinuteHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-dom/components/GetElement.js').getComponent();
+processes.getHourHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-dom/components/GetElement.js').getComponent();
+processes.makeSecondRotation = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-math/components/Divide.js').getComponent();
+processes.rotateSecondHand = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-css/components/RotateElement.js').getComponent();
+processes.split = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-core/components/Split.js').getComponent();
+processes.secondTick = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-core/components/RunInterval.js').getComponent();
+processes.startClock = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-core/components/Repeat.js').getComponent();
+processes.createDate = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-objects/components/CreateDate.js').getComponent();
+processes.makeMinuteRotation = require('/home/bergie/Projects/noflo/grunt-noflo-browser/node_modules/noflo-math/components/Divide.js').getComponent();
+sockets[0] = noflo.internalSocket.createSocket();processes.createDate.outPorts['out'].attach(sockets[0]);
+processes.split.inPorts['in'].attach(sockets[0]);
+sockets[1] = noflo.internalSocket.createSocket();processes.split.outPorts['out'].attach(sockets[1]);
+processes.makeSecondRotation.inPorts['dividend'].attach(sockets[1]);
+sockets[2] = noflo.internalSocket.createSocket();processes.getSecondHand.outPorts['element'].attach(sockets[2]);
+processes.rotateSecondHand.inPorts['element'].attach(sockets[2]);
+sockets[3] = noflo.internalSocket.createSocket();processes.makeSecondRotation.outPorts['quotient'].attach(sockets[3]);
+processes.rotateSecondHand.inPorts['percent'].attach(sockets[3]);
+sockets[4] = noflo.internalSocket.createSocket();processes.split.outPorts['out'].attach(sockets[4]);
+processes.makeMinuteRotation.inPorts['dividend'].attach(sockets[4]);
+sockets[5] = noflo.internalSocket.createSocket();processes.split.outPorts['out'].attach(sockets[5]);
+processes.makeHourRotation.inPorts['dividend'].attach(sockets[5]);
+sockets[6] = noflo.internalSocket.createSocket();processes.getMinuteHand.outPorts['element'].attach(sockets[6]);
+processes.rotateMinuteHand.inPorts['element'].attach(sockets[6]);
+sockets[7] = noflo.internalSocket.createSocket();processes.makeMinuteRotation.outPorts['quotient'].attach(sockets[7]);
+processes.rotateMinuteHand.inPorts['percent'].attach(sockets[7]);
+sockets[8] = noflo.internalSocket.createSocket();processes.getHourHand.outPorts['element'].attach(sockets[8]);
+processes.rotateHourHand.inPorts['element'].attach(sockets[8]);
+sockets[9] = noflo.internalSocket.createSocket();processes.secondTick.outPorts['out'].attach(sockets[9]);
+processes.createDate.inPorts['in'].attach(sockets[9]);
+sockets[10] = noflo.internalSocket.createSocket();processes.split.outPorts['out'].attach(sockets[10]);
+processes.getTimezoneOffset.inPorts['in'].attach(sockets[10]);
+sockets[11] = noflo.internalSocket.createSocket();processes.getTimezoneOffset.outPorts['out'].attach(sockets[11]);
+processes.makeTimezoneAngle.inPorts['dividend'].attach(sockets[11]);
+sockets[12] = noflo.internalSocket.createSocket();processes.makeHourRotation.outPorts['quotient'].attach(sockets[12]);
+processes.fixHourAngle.inPorts['augend'].attach(sockets[12]);
+sockets[13] = noflo.internalSocket.createSocket();processes.makeTimezoneAngle.outPorts['quotient'].attach(sockets[13]);
+processes.fixHourAngle.inPorts['addend'].attach(sockets[13]);
+sockets[14] = noflo.internalSocket.createSocket();processes.fixHourAngle.outPorts['sum'].attach(sockets[14]);
+processes.rotateHourHand.inPorts['percent'].attach(sockets[14]);
+sockets[15] = noflo.internalSocket.createSocket();processes.startClock.outPorts['out'].attach(sockets[15]);
+processes.secondTick.inPorts['start'].attach(sockets[15]);
+sockets[16] = noflo.internalSocket.createSocket();
+processes.getHourHand.inPorts['selector'].attach(sockets[16]);
+sockets[16].send("#hours");
+sockets[16].disconnect();
+sockets[17] = noflo.internalSocket.createSocket();
+processes.getMinuteHand.inPorts['selector'].attach(sockets[17]);
+sockets[17].send("#minutes");
+sockets[17].disconnect();
+sockets[18] = noflo.internalSocket.createSocket();
+processes.getSecondHand.inPorts['selector'].attach(sockets[18]);
+sockets[18].send("#seconds");
+sockets[18].disconnect();
+sockets[19] = noflo.internalSocket.createSocket();
+processes.makeSecondRotation.inPorts['divisor'].attach(sockets[19]);
+sockets[19].send(60000);
+sockets[19].disconnect();
+sockets[20] = noflo.internalSocket.createSocket();
+processes.makeMinuteRotation.inPorts['divisor'].attach(sockets[20]);
+sockets[20].send(3600000);
+sockets[20].disconnect();
+sockets[21] = noflo.internalSocket.createSocket();
+processes.secondTick.inPorts['interval'].attach(sockets[21]);
+sockets[21].send(20);
+sockets[21].disconnect();
+sockets[22] = noflo.internalSocket.createSocket();
+processes.getTimezoneOffset.inPorts['method'].attach(sockets[22]);
+sockets[22].send("getTimezoneOffset");
+sockets[22].disconnect();
+sockets[23] = noflo.internalSocket.createSocket();
+processes.makeHourRotation.inPorts['divisor'].attach(sockets[23]);
+sockets[23].send("43200000");
+sockets[23].disconnect();
+sockets[24] = noflo.internalSocket.createSocket();
+processes.makeTimezoneAngle.inPorts['divisor'].attach(sockets[24]);
+sockets[24].send("-720");
+sockets[24].disconnect();
+sockets[25] = noflo.internalSocket.createSocket();
+processes.startClock.inPorts['in'].attach(sockets[25]);
+sockets[25].send(true);
+sockets[25].disconnect();
+
+});
 require.register("bar/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"}},"fbp":["graphs/SendJson.fbp"]}');
+module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp","graphs/Clock.js"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"},"components":{"Clock":"graphs/Clock.js"}},"fbp":["graphs/SendJson.fbp"]}');
 });
 require.register("bar/graphs/InputExample.json", function(exports, require, module){
 module.exports = JSON.parse('{"properties":{"name":"InputExample","id":"InputExample","project":"on6d1","environment":{"type":"noflo-browser","content":"<input type=\\"text\\" id=\\"search\\" placeholder=\\"Type your query...\\">\\n<button id=\\"submit\\">Search</button>\\n<ul id=\\"results\\">\\n</ul>"}},"inports":{},"outports":{},"groups":[{"name":"Search Input","nodes":["core/Drop_oui72","core/Drop_xk1k4","core/Kick_6bw8b","dom/GetElement_qqzyh","dom/GetElement_ty501","interaction/ListenKeyboard_aioza","interaction/ListenMouse_jbbnx","math/Compare_5actd","objects/GetObjectKey_h51o8","websocket/SendMessage_bzizd"],"metadata":{"description":""}},{"name":"Write results","nodes":["core/Drop_u2w51","dom/CreateElement_x5wvz","dom/GetElement_isxye","dom/WriteHtml_q01ls","strings/SendString_1nixz","strings/SendString_r4bef","websocket/ListenMessages_nffhn"],"metadata":{"description":""}}],"processes":{"dom/GetElement_qqzyh":{"component":"dom/GetElement","metadata":{"label":"GetInput","x":180,"y":180}},"core/Drop_xk1k4":{"component":"core/Drop","metadata":{"label":"core/Drop","x":360,"y":360}},"interaction/ListenKeyboard_aioza":{"component":"interaction/ListenKeyboard","metadata":{"label":"ListenInput","x":360,"y":216}},"websocket/Connect_tfgce":{"component":"websocket/Connect","metadata":{"label":"websocket/Connect","x":756,"y":-216}},"websocket/SendMessage_bzizd":{"component":"websocket/SendMessage","metadata":{"label":"SendSearch","x":900,"y":108}},"core/Drop_46l31":{"component":"core/Drop","metadata":{"label":"core/Drop","x":756,"y":-108}},"objects/GetObjectKey_h51o8":{"component":"objects/GetObjectKey","metadata":{"label":"GetValue","x":756,"y":108}},"core/Kick_6bw8b":{"component":"core/Kick","metadata":{"label":"SendInput","x":612,"y":108}},"websocket/ListenMessages_nffhn":{"component":"websocket/ListenMessages","metadata":{"label":"ListenResults","x":936,"y":-396}},"dom/WriteHtml_q01ls":{"component":"dom/WriteHtml","metadata":{"label":"WriteResult","x":1440,"y":-396}},"dom/CreateElement_x5wvz":{"component":"dom/CreateElement","metadata":{"label":"CreateElement","x":1188,"y":-324}},"dom/GetElement_isxye":{"component":"dom/GetElement","metadata":{"label":"GetContainer","x":1080,"y":-180}},"strings/SendString_r4bef":{"component":"strings/SendString","metadata":{"label":"StartCreate","x":1080,"y":-324}},"core/Drop_u2w51":{"component":"core/Drop","metadata":{"label":"core/Drop","x":1260,"y":-180}},"math/Compare_5actd":{"component":"math/Compare","metadata":{"label":"FindEnter","x":504,"y":216}},"core/Drop_oui72":{"component":"core/Drop","metadata":{"label":"IgnoreOtherKeys","x":612,"y":360}},"dom/GetElement_ty501":{"component":"dom/GetElement","metadata":{"label":"GetButton","x":180,"y":36}},"interaction/ListenMouse_jbbnx":{"component":"interaction/ListenMouse","metadata":{"label":"ListenClick","x":360,"y":36}},"strings/SendString_1nixz":{"component":"strings/SendString","metadata":{"label":"WaitForElement","x":1296,"y":-432}}},"connections":[{"src":{"process":"dom/GetElement_qqzyh","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"interaction/ListenKeyboard_aioza","port":"element"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"connection"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"error"},"tgt":{"process":"core/Drop_46l31","port":"in"},"metadata":{"route":1}},{"src":{"process":"objects/GetObjectKey_h51o8","port":"out"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"string"},"metadata":{}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"core/Kick_6bw8b","port":"data"},"metadata":{"route":0}},{"src":{"process":"core/Kick_6bw8b","port":"out"},"tgt":{"process":"objects/GetObjectKey_h51o8","port":"in"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/ListenMessages_nffhn","port":"connection"},"metadata":{"route":0}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"container"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_r4bef","port":"out"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"tagname"},"metadata":{"route":4}},{"src":{"process":"dom/GetElement_isxye","port":"element"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"container"},"metadata":{"route":6}},{"src":{"process":"dom/GetElement_isxye","port":"error"},"tgt":{"process":"core/Drop_u2w51","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenKeyboard_aioza","port":"keypress"},"tgt":{"process":"math/Compare_5actd","port":"value"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"pass"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"fail"},"tgt":{"process":"core/Drop_oui72","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_ty501","port":"element"},"tgt":{"process":"interaction/ListenMouse_jbbnx","port":"element"},"metadata":{}},{"src":{"process":"dom/GetElement_ty501","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenMouse_jbbnx","port":"click"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"strings/SendString_1nixz","port":"in"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_1nixz","port":"out"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"html"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_r4bef","port":"in"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_1nixz","port":"string"},"metadata":{"route":7}},{"data":"#search","tgt":{"process":"dom/GetElement_qqzyh","port":"selector"}},{"data":"search","tgt":{"process":"websocket/Connect_tfgce","port":"protocol"}},{"data":"ws://127.0.0.1:8000","tgt":{"process":"websocket/Connect_tfgce","port":"url"}},{"data":"value","tgt":{"process":"objects/GetObjectKey_h51o8","port":"key"}},{"data":"li","tgt":{"process":"strings/SendString_r4bef","port":"string"}},{"data":"#results","tgt":{"process":"dom/GetElement_isxye","port":"selector"}},{"data":13,"tgt":{"process":"math/Compare_5actd","port":"comparison"}},{"data":"==","tgt":{"process":"math/Compare_5actd","port":"operator"}},{"data":"#submit","tgt":{"process":"dom/GetElement_ty501","port":"selector"}}]}');
@@ -12657,7 +13248,7 @@ module.exports = {
     "flow"
   ],
   "repo": "noflo/noflo",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "dependencies": {
     "component/emitter": "*",
     "component/underscore": "*",
@@ -12707,8 +13298,7 @@ module.exports = {
   "author": "Henri Bergius <henri.bergius@iki.fi>",
   "repo": "noflo/noflo-dom",
   "version": "0.0.1",
-  "keywords": [
-  ],
+  "keywords": [],
   "dependencies": {
     "noflo/noflo": "*"
   },
@@ -12743,16 +13333,15 @@ module.exports = {
       "GetElement": "components/GetElement.js",
       "HasClass": "components/HasClass.js",
       "Listen": "components/Listen.js",
-      "WriteHtml": "components/WriteHtml.js",
       "ReadHtml": "components/ReadHtml.js",
-      "RemoveElement": "components/RemoveElement.js",
-      "SetAttribute": "components/SetAttribute.js",
       "RemoveClass": "components/RemoveClass.js",
-      "RequestAnimationFrame": "components/RequestAnimationFrame.js"
+      "RemoveElement": "components/RemoveElement.js",
+      "RequestAnimationFrame": "components/RequestAnimationFrame.js",
+      "SetAttribute": "components/SetAttribute.js",
+      "WriteHtml": "components/WriteHtml.js"
     }
   }
 }
-
 });
 require.register("noflo-noflo-core/component.json", function(exports, require, module){
 module.exports = {
@@ -12779,6 +13368,9 @@ module.exports = {
     "noflo/noflo": "*",
     "component/underscore": "*"
   },
+  "remotes": [
+    "https://raw.githubusercontent.com"
+  ],
   "scripts": [
     "components/Callback.js",
     "components/DisconnectAfterPacket.js",
@@ -12807,20 +13399,19 @@ module.exports = {
       "Drop": "components/Drop.js",
       "Group": "components/Group.js",
       "Kick": "components/Kick.js",
+      "MakeFunction": "components/MakeFunction.js",
       "Merge": "components/Merge.js",
       "Output": "components/Output.js",
       "Repeat": "components/Repeat.js",
       "RepeatAsync": "components/RepeatAsync.js",
       "RepeatDelayed": "components/RepeatDelayed.js",
-      "SendNext": "components/SendNext.js",
-      "Split": "components/Split.js",
       "RunInterval": "components/RunInterval.js",
       "RunTimeout": "components/RunTimeout.js",
-      "MakeFunction": "components/MakeFunction.js"
+      "SendNext": "components/SendNext.js",
+      "Split": "components/Split.js"
     }
   }
 }
-
 });
 require.register("noflo-noflo-css/component.json", function(exports, require, module){
 module.exports = {
@@ -12829,8 +13420,7 @@ module.exports = {
   "author": "Henri Bergius <henri.bergius@iki.fi>",
   "repo": "noflo/noflo-css",
   "version": "0.0.1",
-  "keywords": [
-  ],
+  "keywords": [],
   "dependencies": {
     "noflo/noflo": "*"
   },
@@ -12852,13 +13442,12 @@ module.exports = {
     }
   }
 }
-
 });
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
 module.exports = {
   "name": "noflo-objects",
   "description": "Object Utilities for NoFlo",
-  "version": "0.1.0",
+  "version": "0.1.10",
   "keywords": [
     "noflo",
     "objects",
@@ -12948,6 +13537,7 @@ module.exports = {
   },
   "scripts": [
     "components/Add.js",
+    "components/Ceil.js",
     "components/Subtract.js",
     "components/Multiply.js",
     "components/Divide.js",
@@ -12956,6 +13546,8 @@ module.exports = {
     "components/CalculateDistance.js",
     "components/Compare.js",
     "components/CountSum.js",
+    "components/Modulo.js",
+    "components/Random.js",
     "lib/MathComponent.js",
     "index.js"
   ],
@@ -12968,11 +13560,14 @@ module.exports = {
       "Add": "components/Add.js",
       "CalculateAngle": "components/CalculateAngle.js",
       "CalculateDistance": "components/CalculateDistance.js",
+      "Ceil": "components/Ceil.js",
       "Compare": "components/Compare.js",
       "CountSum": "components/CountSum.js",
       "Divide": "components/Divide.js",
       "Floor": "components/Floor.js",
+      "Modulo": "components/Modulo.js",
       "Multiply": "components/Multiply.js",
+      "Random": "components/Random.js",
       "Subtract": "components/Subtract.js"
     }
   }
@@ -13193,6 +13788,7 @@ require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("component-underscore/index.js", "noflo-noflo-objects/deps/underscore/index.js");
 
 require.alias("noflo-noflo-math/components/Add.js", "bar/deps/noflo-math/components/Add.js");
+require.alias("noflo-noflo-math/components/Ceil.js", "bar/deps/noflo-math/components/Ceil.js");
 require.alias("noflo-noflo-math/components/Subtract.js", "bar/deps/noflo-math/components/Subtract.js");
 require.alias("noflo-noflo-math/components/Multiply.js", "bar/deps/noflo-math/components/Multiply.js");
 require.alias("noflo-noflo-math/components/Divide.js", "bar/deps/noflo-math/components/Divide.js");
@@ -13201,6 +13797,8 @@ require.alias("noflo-noflo-math/components/CalculateAngle.js", "bar/deps/noflo-m
 require.alias("noflo-noflo-math/components/CalculateDistance.js", "bar/deps/noflo-math/components/CalculateDistance.js");
 require.alias("noflo-noflo-math/components/Compare.js", "bar/deps/noflo-math/components/Compare.js");
 require.alias("noflo-noflo-math/components/CountSum.js", "bar/deps/noflo-math/components/CountSum.js");
+require.alias("noflo-noflo-math/components/Modulo.js", "bar/deps/noflo-math/components/Modulo.js");
+require.alias("noflo-noflo-math/components/Random.js", "bar/deps/noflo-math/components/Random.js");
 require.alias("noflo-noflo-math/lib/MathComponent.js", "bar/deps/noflo-math/lib/MathComponent.js");
 require.alias("noflo-noflo-math/index.js", "bar/deps/noflo-math/index.js");
 require.alias("noflo-noflo-math/index.js", "noflo-math/index.js");
