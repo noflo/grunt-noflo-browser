@@ -32,7 +32,12 @@
     "grunt-contrib-clean": "^0.5.0",
     "grunt-contrib-nodeunit": "^0.3.3",
     "grunt": "~0.4.1",
-    "grunt-noflo-manifest": "^0.1.4"
+    "grunt-noflo-manifest": "^0.1.4",
+    "noflo-math": "0.0.6",
+    "noflo-core": "^0.1.9",
+    "noflo-objects": "^0.1.10",
+    "noflo-dom": "git://github.com/noflo/noflo-dom.git",
+    "noflo-css": "git://github.com/noflo/noflo-css.git"
   },
   "peerDependencies": {
     "grunt": "~0.4.1"
@@ -46,6 +51,9 @@
     "component-installer": "0.0.8",
     "component-json": "git://github.com/bergie/component-json.git",
     "component-coffee": "^0.1.4",
-    "component-fbp": "^0.1.0"
+    "component-fbp": "^0.1.0",
+    "noflo": "^0.5.2",
+    "browserify": "^4.1.5",
+    "coffeeify": "^0.6.0"
   }
 }

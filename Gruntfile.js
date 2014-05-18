@@ -45,6 +45,14 @@ module.exports = function(grunt) {
       }
     },
 
+    noflo_optimized: {
+      build: {
+        files: {
+          'tmp2/noflo.js': ['test/fixtures/graphs/Clock.json']
+        }
+      }
+    },
+
     // Unit tests.
     nodeunit: {
       tests: ['test/*_test.js'],
