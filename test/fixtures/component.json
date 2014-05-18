@@ -19,8 +19,7 @@
     "index.js",
     "graphs/InputExample.json",
     "graphs/Clock.json",
-    "graphs/SendJson.fbp",
-    "graphs/Clock.js"
+    "graphs/SendJson.fbp"
   ],
   "json": [
     "component.json",
@@ -32,9 +31,6 @@
       "Clock": "graphs/Clock.json",
       "InputExample": "graphs/InputExample.json",
       "SendJson": "graphs/SendJson.fbp"
-    },
-    "components": {
-      "Clock": "graphs/Clock.js"
     }
   },
   "fbp": [
