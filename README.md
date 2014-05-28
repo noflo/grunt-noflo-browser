@@ -1,4 +1,4 @@
-# grunt-noflo-browser [![Build Status](https://travis-ci.org/noflo/grunt-noflo-browser.svg?branch=master)](https://travis-ci.org/noflo/grunt-noflo-browser)
+# grunt-noflo-browser [![Build Status](https://travis-ci.org/noflo/grunt-noflo-browser.svg?branch=master)](https://travis-ci.org/noflo/grunt-noflo-browser) [![Build status](https://ci.appveyor.com/api/projects/status/ft5ybv2laqu5aeio)](https://ci.appveyor.com/project/bergie/grunt-noflo-browser)
 
 > Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them.
 
