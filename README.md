@@ -17,7 +17,7 @@ Once the plugin has been installed, it may be enabled inside your Gruntfile with
 grunt.loadNpmTasks('grunt-noflo-browser');
 ```
 
-## The "noflo_browser" task
+## The `noflo_browser` task
 
 ### Overview
 In your project's Gruntfile, add a section named `noflo_browser` to the data object passed into `grunt.initConfig()`.
@@ -59,6 +59,24 @@ grunt.initConfig({
   },
 });
 ```
+
+## The `noflo_optimized` task
+This task creates an optimized build of NoFlo with no unused files present, which can provide a file size benefit of around 60-80% depending on your project dependencies. However, it is based on a new build setup made on top of [Browserify](http://browserify.org/) and therefore is not yet reliable enough for production yet.
+
+### Overview
+In your project's Gruntfile, add a section named `noflo_optimized` to the data object passed into `grunt.initConfig()`.
+
+```js
+grunt.initConfig({
+  noflo_optimized: {
+    options: {
+      // Task-specific options go here.
+    },
+    build: {
+      // Target-specific file lists and/or options go here.
+    },
+  },
+});
 
 ## Contributing
 In lieu of a formal styleguide, take care to maintain the existing coding style. Add unit tests for any new or changed functionality. Lint and test your code using [Grunt](http://gruntjs.com/).
