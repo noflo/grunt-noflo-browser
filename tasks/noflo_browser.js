@@ -24,7 +24,8 @@ module.exports = function(grunt) {
         'component-coffee',
         'component-fbp'
       ],
-      remotes: []
+      remotes: [],
+      graph_scripts: []
     });
 
     // Force task to async mode
@@ -32,7 +33,7 @@ module.exports = function(grunt) {
     var todo = 0;
 
     var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/graph.html'));
-    var writeGraphFiles = function (manifest, srcDir, destDir, destPath) {
+    var writeGraphFiles = function (manifest, scripts, srcDir, destDir, destPath) {
       if (!manifest.noflo || !manifest.noflo.graphs) {
         return;
       }
@@ -51,6 +52,7 @@ module.exports = function(grunt) {
         var templated = grunt.template.process(graphFileTemplate, {
           data: {
             name: graphName,
+            scripts: scripts,
             lib: manifest.name,
             noflo: destPath,
             graphPath: manifest.name + '/' + manifest.noflo.graphs[graphName],
@@ -154,7 +156,7 @@ module.exports = function(grunt) {
             // Print a success message.
             grunt.log.writeln('File "' + f.dest + '" built.');
 
-            writeGraphFiles(grunt.file.readJSON(manifestPath), manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
+            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
 
             todo--;
             if (todo === 0) {
