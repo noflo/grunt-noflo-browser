@@ -383,9 +383,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Save the previous value of the `_` variable.
   var previousUnderscore = root._;
 
-  // Establish the object that gets returned to break out of a loop iteration.
-  var breaker = {};
-
   // Save bytes in the minified (but not gzipped) version:
   var ArrayProto = Array.prototype, ObjProto = Object.prototype, FuncProto = Function.prototype;
 
@@ -429,7 +426,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Internal function: creates a callback bound to its context if supplied
   var createCallback = function(func, context, argCount) {
-    if (!context) return func;
+    if (context === void 0) return func;
     switch (argCount == null ? 3 : argCount) {
       case 1: return function(value) {
         return func.call(context, value);
@@ -445,7 +442,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       };
     }
     return function() {
-      return func.apply(this, arguments);
+      return func.apply(context, arguments);
     };
   };
 
@@ -464,17 +461,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Handles raw objects in addition to array-likes. Treats all
   // sparse array-likes as if they were dense.
   _.each = _.forEach = function(obj, iterator, context) {
-    var i, length;
     if (obj == null) return obj;
     iterator = createCallback(iterator, context);
-    if (obj.length === +obj.length) {
-      for (i = 0, length = obj.length; i < length; i++) {
-        if (iterator(obj[i], i, obj) === breaker) break;
+    var i, length = obj.length;
+    if (length === +length) {
+      for (i = 0; i < length; i++) {
+        iterator(obj[i], i, obj);
       }
     } else {
       var keys = _.keys(obj);
       for (i = 0, length = keys.length; i < length; i++) {
-        if (iterator(obj[keys[i]], keys[i], obj) === breaker) break;
+        iterator(obj[keys[i]], keys[i], obj);
       }
     }
     return obj;
@@ -482,12 +479,19 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Return the results of applying the iterator to each element.
   _.map = _.collect = function(obj, iterator, context) {
-    var results = [];
-    if (obj == null) return results;
+    if (obj == null) return [];
     iterator = lookupIterator(iterator, context);
-    _.each(obj, function(value, index, list) {
-      results.push(iterator(value, index, list));
-    });
+    var length = obj.length,
+        currentKey, keys;
+    if (length !== +length) {
+      keys = _.keys(obj);
+      length = keys.length;
+    }
+    var results = Array(length);
+    for (var index = 0; index < length; index++) {
+      currentKey = keys ? keys[index] : index;
+      results[index] = iterator(obj[currentKey], currentKey, obj);
+    }
     return results;
   };
 
@@ -496,41 +500,43 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`.
   _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
-    var initial = arguments.length > 2;
     if (obj == null) obj = [];
     iterator = createCallback(iterator, context, 4);
-    _.each(obj, function(value, index, list) {
-      if (!initial) {
-        memo = value;
-        initial = true;
-      } else {
-        memo = iterator(memo, value, index, list);
-      }
-    });
-    if (!initial) throw TypeError(reduceError);
+    var index = 0, length = obj.length,
+        currentKey, keys;
+    if (length !== +length) {
+      keys = _.keys(obj);
+      length = keys.length;
+    }
+    if (arguments.length < 3) {
+      if (!length) throw TypeError(reduceError);
+      memo = obj[keys ? keys[index++] : index++];
+    }
+    for (; index < length; index++) {
+      currentKey = keys ? keys[index] : index;
+      memo = iterator(memo, obj[currentKey], currentKey, obj);
+    }
     return memo;
   };
 
   // The right-associative version of reduce, also known as `foldr`.
   _.reduceRight = _.foldr = function(obj, iterator, memo, context) {
-    var initial = arguments.length > 2;
     if (obj == null) obj = [];
-    var length = obj.length;
     iterator = createCallback(iterator, context, 4);
-    if (length !== +length) {
-      var keys = _.keys(obj);
-      length = keys.length;
+    var index = obj.length,
+        currentKey, keys;
+    if (index !== +index) {
+      keys = _.keys(obj);
+      index = keys.length;
     }
-    _.each(obj, function(value, index, list) {
-      index = keys ? keys[--length] : --length;
-      if (!initial) {
-        memo = obj[index];
-        initial = true;
-      } else {
-        memo = iterator(memo, obj[index], index, list);
-      }
-    });
-    if (!initial) throw TypeError(reduceError);
+    if (arguments.length < 3) {
+      if (!index) throw TypeError(reduceError);
+      memo = obj[keys ? keys[--index] : --index];
+    }
+    while (index--) {
+      currentKey = keys ? keys[index] : index;
+      memo = iterator(memo, obj[currentKey], currentKey, obj);
+    }
     return memo;
   };
 
@@ -567,37 +573,47 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Determine whether all of the elements match a truth test.
   // Aliased as `all`.
   _.every = _.all = function(obj, predicate, context) {
-    var result = true;
-    if (obj == null) return result;
+    if (obj == null) return true;
     predicate = lookupIterator(predicate, context);
-    _.each(obj, function(value, index, list) {
-      result = predicate(value, index, list);
-      if (!result) return breaker;
-    });
-    return !!result;
+    var length = obj.length;
+    var index, currentKey, keys;
+    if (length !== +length) {
+      keys = _.keys(obj);
+      length = keys.length;
+    }
+    for (index = 0; index < length; index++) {
+      currentKey = keys ? keys[index] : index;
+      if (!predicate(obj[currentKey], currentKey, obj)) return false;
+    }
+    return true;
   };
 
   // Determine if at least one element in the object matches a truth test.
   // Aliased as `any`.
+  // Determine if at least one element in the object matches a truth test.
+  // Aliased as `any`.
   _.some = _.any = function(obj, predicate, context) {
-    var result = false;
-    if (obj == null) return result;
+    if (obj == null) return false;
     predicate = lookupIterator(predicate, context);
-    _.each(obj, function(value, index, list) {
-      result = predicate(value, index, list);
-      if (result) return breaker;
-    });
-    return !!result;
+    var length = obj.length;
+    var index, currentKey, keys;
+    if (length !== +length) {
+      keys = _.keys(obj);
+      length = keys.length;
+    }
+    for (index = 0; index < length; index++) {
+      currentKey = keys ? keys[index] : index;
+      if (predicate(obj[currentKey], currentKey, obj)) return true;
+    }
+    return false;
   };
 
   // Determine if the array or object contains a given value (using `===`).
   // Aliased as `include`.
   _.contains = _.include = function(obj, target) {
     if (obj == null) return false;
-    if (obj.length === +obj.length) return _.indexOf(obj, target) >= 0;
-    return _.some(obj, function(value) {
-      return value === target;
-    });
+    if (obj.length !== +obj.length) obj = _.values(obj);
+    return _.indexOf(obj, target) >= 0;
   };
 
   // Invoke a method (with arguments) on every item in a collection.
@@ -778,6 +794,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return obj.length === +obj.length ? obj.length : _.keys(obj).length;
   };
 
+  // Split a collection into two arrays: one whose elements all satisfy the given
+  // predicate, and one whose elements all do not satisfy the predicate.
+  _.partition = function(obj, predicate, context) {
+    predicate = lookupIterator(predicate, context);
+    var pass = [], fail = [];
+    _.each(obj, function(value, key, obj) {
+      (predicate(value, key, obj) ? pass : fail).push(value);
+    });
+    return [pass, fail];
+  };
+
   // Array Functions
   // ---------------
 
@@ -848,17 +875,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return _.difference(array, slice.call(arguments, 1));
   };
 
-  // Split an array into two arrays: one whose elements all satisfy the given
-  // predicate, and one whose elements all do not satisfy the predicate.
-  _.partition = function(obj, predicate, context) {
-    predicate = lookupIterator(predicate, context, 1);
-    var pass = [], fail = [];
-    _.each(obj, function(value, key, obj) {
-      (predicate(value, key, obj) ? pass : fail).push(value);
-    });
-    return [pass, fail];
-  };
-
   // Produce a duplicate-free version of the array. If the array has already
   // been sorted, you have the option of using a faster algorithm.
   // Aliased as `unique`.
@@ -918,11 +934,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Zip together multiple lists into a single array -- elements that share
   // an index go together.
-  _.zip = function() {
-    var length = _.max(_.pluck(arguments, 'length').concat(0));
+  _.zip = function(array) {
+    if (array == null) return [];
+    var length = _.max(arguments, 'length').length;
     var results = Array(length);
     for (var i = 0; i < length; i++) {
-      results[i] = _.pluck(arguments, '' + i);
+      results[i] = _.pluck(arguments, i);
     }
     return results;
   };
@@ -964,8 +981,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   _.lastIndexOf = function(array, item, from) {
     if (array == null) return -1;
-    var i = from == null ? array.length : from;
-    while (i--) if (array[i] === item) return i;
+    var idx = array.length;
+    if (typeof from == 'number') {
+      idx = from < 0 ? idx + from + 1 : Math.min(idx, from + 1);
+    }
+    while (--idx >= 0) if (array[idx] === item) return idx;
     return -1;
   };
 
@@ -977,15 +997,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       stop = start || 0;
       start = 0;
     }
-    step = arguments[2] || 1;
+    step = step || 1;
 
     var length = Math.max(Math.ceil((stop - start) / step), 0);
-    var idx = 0;
     var range = Array(length);
 
-    while (idx < length) {
-      range[idx++] = start;
-      start += step;
+    for (var idx = 0; idx < length; idx++, start += step) {
+      range[idx] = start;
     }
 
     return range;
@@ -1037,21 +1055,21 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // are the method names to be bound. Useful for ensuring that all callbacks
   // defined on an object belong to it.
   _.bindAll = function(obj) {
-    var funcs = slice.call(arguments, 1);
-    if (funcs.length === 0) throw Error('bindAll must be passed function names');
-    _.each(funcs, function(f) {
-      obj[f] = _.bind(obj[f], obj);
-    });
+    var i, length = arguments.length, key;
+    if (length <= 1) throw Error('bindAll must be passed function names');
+    for (i = 1; i < length; i++) {
+      key = arguments[i];
+      obj[key] = _.bind(obj[key], obj);
+    }
     return obj;
   };
 
   // Memoize an expensive function by storing its results.
   _.memoize = function(func, hasher) {
-    if (!hasher) hasher = _.identity;
-    var memoize = function() {
+    var memoize = function(key) {
       var cache = memoize.cache;
-      var key = hasher.apply(this, arguments);
-      if (!_.has(cache, key)) cache[key] = func.apply(this, arguments);
+      var address = hasher ? hasher.apply(this, arguments) : key;
+      if (!_.has(cache, address)) cache[address] = func.apply(this, arguments);
       return cache[key];
     };
     memoize.cache = {};
@@ -1144,19 +1162,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   };
 
-  // Returns a function that will be executed at most one time, no matter how
-  // often you call it. Useful for lazy initialization.
-  _.once = function(func) {
-    var ran = false, memo;
-    return function() {
-      if (ran) return memo;
-      ran = true;
-      memo = func.apply(this, arguments);
-      func = null;
-      return memo;
-    };
-  };
-
   // Returns the first function passed as an argument to the second,
   // allowing you to adjust arguments, run code before and after, and
   // conditionally execute the original function.
@@ -1174,13 +1179,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Returns a function that is the composition of a list of functions, each
   // consuming the return value of the function that follows.
   _.compose = function() {
-    var funcs = arguments;
+    var args = arguments;
+    var start = args.length - 1;
     return function() {
-      var args = arguments;
-      for (var i = funcs.length - 1; i >= 0; i--) {
-        args = [funcs[i].apply(this, args)];
-      }
-      return args[0];
+      var i = start;
+      var result = args[start].apply(this, arguments);
+      while (i--) result = args[i].call(this, result);
+      return result;
     };
   };
 
@@ -1192,6 +1197,22 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       }
     };
   };
+
+  // Returns a function that will only be executed before being called N times.
+  _.before = function(times, func) {
+    var memo;
+    return function() {
+      if (--times > 0) {
+        memo = func.apply(this, arguments);
+      }
+      else func = null;
+      return memo;
+    };
+  };
+
+  // Returns a function that will be executed at most one time, no matter how
+  // often you call it. Useful for lazy initialization.
+  _.once = _.partial(_.before, 2);
 
   // Object Functions
   // ----------------
@@ -1251,24 +1272,29 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Extend a given object with all the properties in passed-in object(s).
   _.extend = function(obj) {
     if (!_.isObject(obj)) return obj;
-    _.each(slice.call(arguments, 1), function(source) {
-      for (var prop in source) {
+    var source, prop;
+    for (var i = 1, length = arguments.length; i < length; i++) {
+      source = arguments[i];
+      for (prop in source) {
         obj[prop] = source[prop];
       }
-    });
+    }
     return obj;
   };
 
   // Return a copy of the object only containing the whitelisted properties.
   _.pick = function(obj, iterator, context) {
     var result = {}, key;
+    if (obj == null) return result;
     if (_.isFunction(iterator)) {
+      iterator = createCallback(iterator, context);
       for (key in obj) {
         var value = obj[key];
-        if (iterator.call(context, value, key, obj)) result[key] = value;
+        if (iterator(value, key, obj)) result[key] = value;
       }
     } else {
       var keys = concat.apply([], slice.call(arguments, 1));
+      obj = Object(obj);
       for (var i = 0, length = keys.length; i < length; i++) {
         key = keys[i];
         if (key in obj) result[key] = obj[key];
@@ -1279,11 +1305,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
    // Return a copy of the object without the blacklisted properties.
   _.omit = function(obj, iterator, context) {
-    var keys;
     if (_.isFunction(iterator)) {
       iterator = _.negate(iterator);
     } else {
-      keys = _.map(concat.apply([], slice.call(arguments, 1)), String);
+      var keys = _.map(concat.apply([], slice.call(arguments, 1)), String);
       iterator = function(value, key) {
         return !_.contains(keys, key);
       };
@@ -1294,11 +1319,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Fill in a given object with default properties.
   _.defaults = function(obj) {
     if (!_.isObject(obj)) return obj;
-    _.each(slice.call(arguments, 1), function(source) {
+    for (var i = 1, length = arguments.length; i < length; i++) {
+      var source = arguments[i];
       for (var prop in source) {
         if (obj[prop] === void 0) obj[prop] = source[prop];
       }
-    });
+    }
     return obj;
   };
 
@@ -1330,15 +1356,16 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var className = toString.call(a);
     if (className !== toString.call(b)) return false;
     switch (className) {
-      // RegExps are coerced to strings for comparison.
+      // Strings, numbers, regular expressions, dates, and booleans are compared by value.
       case '[object RegExp]':
-      // Strings, numbers, dates, and booleans are compared by value.
+      // RegExps are coerced to strings for comparison (Note: '' + /a/i === '/a/i')
       case '[object String]':
         // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
-        // equivalent to `String("5")`.
+        // equivalent to `new String("5")`.
         return '' + a === '' + b;
       case '[object Number]':
         // `NaN`s are equivalent, but non-reflexive.
+        // Object(NaN) is equivalent to NaN
         if (a != +a) return b != +b;
         // An `egal` comparison is performed for other numeric values.
         return a == 0 ? 1 / a == 1 / b : a == +b;
@@ -1362,7 +1389,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     // from different frames are.
     var aCtor = a.constructor, bCtor = b.constructor;
     if (
-      aCtor !== bCtor && 'constructor' in a && 'constructor' in b &&
+      aCtor !== bCtor &&
+      // Handle Object.create(x) cases
+      'constructor' in a && 'constructor' in b &&
       !(_.isFunction(aCtor) && aCtor instanceof aCtor &&
         _.isFunction(bCtor) && bCtor instanceof bCtor)
     ) {
@@ -1371,7 +1400,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     // Add the first object to the stack of traversed objects.
     aStack.push(a);
     bStack.push(b);
-    var size = 0, result = true;
+    var size, result;
     // Recursively compare objects and arrays.
     if (className === '[object Array]') {
       // Compare array lengths to determine if a deep comparison is necessary.
@@ -1385,20 +1414,16 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       }
     } else {
       // Deep compare objects.
-      for (var key in a) {
-        if (_.has(a, key)) {
-          // Count the expected number of properties.
-          size++;
-          // Deep compare each member.
+      var keys = _.keys(a), key;
+      size = keys.length;
+      // Ensure that both objects contain the same number of properties before comparing deep equality.
+      result = _.keys(b).length == size;
+      if (result) {
+        while (size--) {
+          // Deep compare each member
+          key = keys[size];
           if (!(result = _.has(b, key) && eq(a[key], b[key], aStack, bStack))) break;
         }
-      }
-      // Ensure that both objects contain the same number of properties.
-      if (result) {
-        for (key in b) {
-          if (_.has(b, key) && !size--) break;
-        }
-        result = !size;
       }
     }
     // Remove the first object from the stack of traversed objects.
@@ -1684,9 +1709,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return template;
   };
 
-  // Add a "chain" function, which will delegate to the wrapper.
+  // Add a "chain" function. Start chaining a wrapped Underscore object.
   _.chain = function(obj) {
-    return _(obj).chain();
+    var instance = _(obj);
+    instance._chain = true;
+    return instance;
   };
 
   // OOP
@@ -1734,20 +1761,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   });
 
-  _.extend(_.prototype, {
-
-    // Start chaining a wrapped Underscore object.
-    chain: function() {
-      this._chain = true;
-      return this;
-    },
-
-    // Extracts the result from a wrapped and chained object.
-    value: function() {
-      return this._wrapped;
-    }
-
-  });
+  // Extracts the result from a wrapped and chained object.
+  _.prototype.value = function() {
+    return this._wrapped;
+  };
 
   // AMD registration happens at the end for compatibility with AMD loaders
   // that may not enforce next-turn semantics on modules. Even though general
@@ -3546,7 +3563,7 @@ module.exports = (function(){
 })();
 });
 require.register("noflo-noflo/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.1","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
+module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.6","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
 });
 require.register("noflo-noflo/src/lib/Graph.js", function(exports, require, module){
 var EventEmitter, Graph, clone, platform,
@@ -4752,7 +4769,7 @@ BasePort = (function(_super) {
       options.datatype = 'all';
     }
     if (options.required === void 0) {
-      options.required = true;
+      options.required = false;
     }
     if (options.datatype === 'integer') {
       options.datatype = 'int';
@@ -5068,9 +5085,20 @@ BasePort = require('./BasePort');
 OutPort = (function(_super) {
   __extends(OutPort, _super);
 
-  function OutPort() {
-    return OutPort.__super__.constructor.apply(this, arguments);
+  function OutPort(options) {
+    this.cache = {};
+    OutPort.__super__.constructor.call(this, options);
   }
+
+  OutPort.prototype.attach = function(socket, index) {
+    if (index == null) {
+      index = null;
+    }
+    OutPort.__super__.attach.call(this, socket, index);
+    if (this.isCaching() && (this.cache[index] != null)) {
+      return this.send(this.cache[index], index);
+    }
+  };
 
   OutPort.prototype.connect = function(socketId) {
     var socket, sockets, _i, _len, _results;
@@ -5118,6 +5146,9 @@ OutPort = (function(_super) {
     }
     sockets = this.getSockets(socketId);
     this.checkRequired(sockets);
+    if (this.isCaching() && data !== this.cache[socketId]) {
+      this.cache[socketId] = data;
+    }
     return sockets.forEach(function(socket) {
       if (!socket) {
         return;
@@ -5185,6 +5216,13 @@ OutPort = (function(_super) {
       return [this.sockets[socketId]];
     }
     return this.sockets;
+  };
+
+  OutPort.prototype.isCaching = function() {
+    if (this.options.caching) {
+      return true;
+    }
+    return false;
   };
 
   return OutPort;
@@ -6267,7 +6305,7 @@ ComponentLoader = (function(_super) {
         instance = implementation.getComponent(metadata);
       } else {
         if (typeof implementation !== 'function') {
-          throw new Error("Component " + name + " is npt loadable");
+          throw new Error("Component " + name + " is not loadable");
         }
         instance = implementation(metadata);
       }
@@ -7859,7 +7897,12 @@ exports.guessLanguageFromFilename = guessLanguageFromFilename;
 
 });
 require.register("noflo-noflo/src/lib/Helpers.js", function(exports, require, module){
-var AtomicSender;
+var StreamReceiver, StreamSender,
+  __hasProp = {}.hasOwnProperty;
+
+StreamSender = require('./Streams').StreamSender;
+
+StreamReceiver = require('./Streams').StreamReceiver;
 
 exports.MapComponent = function(component, func, config) {
   var groups, inPort, outPort;
@@ -7894,109 +7937,185 @@ exports.MapComponent = function(component, func, config) {
   };
 };
 
-AtomicSender = (function() {
-  function AtomicSender(port, groups) {
-    this.port = port;
-    this.groups = groups;
-    this.groupsSent = false;
-  }
-
-  AtomicSender.prototype.beginGroup = function(group) {
-    return this.port.beginGroup(group);
-  };
-
-  AtomicSender.prototype.endGroup = function() {
-    return this.port.endGroup();
-  };
-
-  AtomicSender.prototype.connect = function() {
-    this.port.connect();
-    return this.groupsSent = false;
-  };
-
-  AtomicSender.prototype.disconnect = function() {
-    var group, _i, _len, _ref;
-    _ref = this.groups;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
-      this.port.endGroup();
-    }
-    this.port.disconnect();
-    return this.groupsSent = false;
-  };
-
-  AtomicSender.prototype.send = function(packet) {
-    var group, _i, _len, _ref;
-    if (!this.groupsSent) {
-      _ref = this.groups;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        group = _ref[_i];
-        this.port.beginGroup(group);
-      }
-      this.groupsSent = true;
-    }
-    return this.port.send(packet);
-  };
-
-  return AtomicSender;
-
-})();
-
-exports.GroupedInput = function(component, config, func) {
-  var defaultForwarding, forwardGroups, groupedData, groupedDataGroups, inPorts, name, out, outPort, port, _fn, _i, _j, _len, _len1;
+exports.WirePattern = function(component, config, proc) {
+  var collectGroups, completeParams, groupedData, groupedDataGroups, inPorts, name, outPorts, port, processQueue, q, requiredParams, resumeTaskQ, taskQ, _fn, _fn1, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1;
   inPorts = 'in' in config ? config["in"] : 'in';
-  if (Object.prototype.toString.call(inPorts) !== '[object Array]') {
+  if (!(inPorts instanceof Array)) {
     inPorts = [inPorts];
   }
-  outPort = 'out' in config ? config.out : 'out';
+  outPorts = 'out' in config ? config.out : 'out';
+  if (!(outPorts instanceof Array)) {
+    outPorts = [outPorts];
+  }
   if (!('async' in config)) {
     config.async = false;
+  }
+  if (!('ordered' in config)) {
+    config.ordered = false;
   }
   if (!('group' in config)) {
     config.group = false;
   }
-  defaultForwarding = config.group ? true : false;
   if (!('field' in config)) {
     config.field = null;
   }
   if (!('forwardGroups' in config)) {
-    config.forwardGroups = defaultForwarding;
+    config.forwardGroups = false;
   }
-  forwardGroups = config.forwardGroups;
-  if (forwardGroups === true && !config.group) {
-    forwardGroups = inPorts;
+  if (!('receiveStreams' in config)) {
+    config.receiveStreams = false;
   }
-  if (typeof forwardGroups === 'string' && !config.group) {
-    forwardGroups = [forwardGroups];
+  if (typeof config.receiveStreams === 'string') {
+    config.receiveStreams = [config.receiveStreams];
   }
-  if (forwardGroups !== false && config.group) {
-    forwardGroups = true;
+  if (!('sendStreams' in config)) {
+    config.sendStreams = false;
+  }
+  if (typeof config.sendStreams === 'string') {
+    config.sendStreams = [config.sendStreams];
+  }
+  if (config.async) {
+    config.sendStreams = outPorts;
+  }
+  if (!('params' in config)) {
+    config.params = [];
+  }
+  if (typeof config.params === 'string') {
+    config.params = [config.params];
+  }
+  collectGroups = config.forwardGroups;
+  if (typeof collectGroups === 'boolean' && !config.group) {
+    collectGroups = inPorts;
+  }
+  if (typeof collectGroups === 'string' && !config.group) {
+    collectGroups = [collectGroups];
+  }
+  if (collectGroups !== false && config.group) {
+    collectGroups = true;
   }
   for (_i = 0, _len = inPorts.length; _i < _len; _i++) {
     name = inPorts[_i];
     if (!component.inPorts[name]) {
       throw new Error("no inPort named '" + name + "'");
     }
+    component.inPorts[name].options.required = true;
   }
-  if (!component.outPorts[outPort]) {
-    throw new Error("no outPort named '" + outPort + "'");
+  for (_j = 0, _len1 = outPorts.length; _j < _len1; _j++) {
+    name = outPorts[_j];
+    if (!component.outPorts[name]) {
+      throw new Error("no outPort named '" + name + "'");
+    }
   }
-  if (!component.metadata) {
-    component.metadata = {};
-  }
-  if (inPorts.length > 1) {
-    component.metadata.groupedInputs = inPorts;
-  }
-  component.metadata.async = config.async;
   groupedData = {};
   groupedDataGroups = {};
-  out = component.outPorts[outPort];
+  q = [];
+  processQueue = function() {
+    var flushed, key, stream, streams;
+    while (q.length > 0) {
+      streams = q[0];
+      flushed = false;
+      if (outPorts.length === 1) {
+        if (streams.resolved) {
+          flushed = streams.flush();
+          if (flushed) {
+            q.shift();
+          }
+        }
+      } else {
+        for (key in streams) {
+          stream = streams[key];
+          if (stream.resolved) {
+            flushed = stream.flush();
+            if (flushed) {
+              q.shift();
+            }
+          }
+        }
+      }
+      if (!flushed) {
+        return;
+      }
+    }
+  };
+  if (config.async) {
+    if ('load' in component.outPorts) {
+      component.load = 0;
+    }
+    component.beforeProcess = function(outs) {
+      if (config.ordered) {
+        q.push(outs);
+      }
+      component.load++;
+      if ('load' in component.outPorts && component.outPorts.load.isAttached()) {
+        component.outPorts.load.send(component.load);
+        return component.outPorts.load.disconnect();
+      }
+    };
+    component.afterProcess = function(err, outs) {
+      processQueue();
+      component.load--;
+      if ('load' in component.outPorts && component.outPorts.load.isAttached()) {
+        component.outPorts.load.send(component.load);
+        return component.outPorts.load.disconnect();
+      }
+    };
+  }
+  taskQ = [];
+  component.params = {};
+  requiredParams = [];
+  completeParams = [];
+  resumeTaskQ = function() {
+    var task, temp, _results;
+    if (completeParams.length === requiredParams.length && taskQ.length > 0) {
+      temp = taskQ.slice(0);
+      taskQ = [];
+      _results = [];
+      while (temp.length > 0) {
+        task = temp.shift();
+        _results.push(task());
+      }
+      return _results;
+    }
+  };
+  _ref = config.params;
+  for (_k = 0, _len2 = _ref.length; _k < _len2; _k++) {
+    port = _ref[_k];
+    if (!component.inPorts[port]) {
+      throw new Error("no inPort named '" + port + "'");
+    }
+    if (component.inPorts[port].isRequired()) {
+      requiredParams.push(port);
+    }
+  }
+  _ref1 = config.params;
   _fn = function(port) {
     var inPort;
     inPort = component.inPorts[port];
+    return inPort.process = function(event, payload) {
+      if (event !== 'data') {
+        return;
+      }
+      component.params[port] = payload;
+      if (completeParams.indexOf(port) === -1 && requiredParams.indexOf(port) > -1) {
+        completeParams.push(port);
+      }
+      return resumeTaskQ();
+    };
+  };
+  for (_l = 0, _len3 = _ref1.length; _l < _len3; _l++) {
+    port = _ref1[_l];
+    _fn(port);
+  }
+  _fn1 = function(port) {
+    var inPort;
+    if (config.receiveStreams && config.receiveStreams.indexOf(port) !== -1) {
+      inPort = new StreamReceiver(component.inPorts[port]);
+    } else {
+      inPort = component.inPorts[port];
+    }
     inPort.groups = [];
     return inPort.process = function(event, payload) {
-      var atomicOut, callback, groups, grp, key, requiredLength, _k, _len2, _ref;
+      var data, g, groups, grp, key, out, outs, p, postpone, postponedToQ, requiredLength, resume, task, whenDone, _len5, _len6, _len7, _len8, _len9, _n, _o, _p, _q, _r, _ref2;
       switch (event) {
         case 'begingroup':
           return inPort.groups.push(payload);
@@ -8006,6 +8125,11 @@ exports.GroupedInput = function(component, config, func) {
           key = '';
           if (config.group && inPort.groups.length > 0) {
             key = inPort.groups.toString();
+            if (config.group instanceof RegExp) {
+              if (!config.group.test(key)) {
+                key = '';
+              }
+            }
           } else if (config.field && typeof payload === 'object' && config.field in payload) {
             key = payload[config.field];
           }
@@ -8020,53 +8144,496 @@ exports.GroupedInput = function(component, config, func) {
           } else {
             groupedData[key][port] = payload;
           }
-          if (Object.prototype.toString.call(forwardGroups) === '[object Array]' && forwardGroups.indexOf(port) !== -1) {
+          if (collectGroups instanceof Array && collectGroups.indexOf(port) !== -1) {
             if (!(key in groupedDataGroups)) {
               groupedDataGroups[key] = [];
             }
-            _ref = inPort.groups;
-            for (_k = 0, _len2 = _ref.length; _k < _len2; _k++) {
-              grp = _ref[_k];
+            _ref2 = inPort.groups;
+            for (_n = 0, _len5 = _ref2.length; _n < _len5; _n++) {
+              grp = _ref2[_n];
               if (groupedDataGroups[key].indexOf(grp) === -1) {
                 groupedDataGroups[key].push(grp);
               }
             }
           }
-          requiredLength = config.field ? inPorts.length + 1 : inPorts.length;
+          requiredLength = inPorts.length;
+          if (config.field) {
+            ++requiredLength;
+          }
           if (requiredLength === 1 || Object.keys(groupedData[key]).length === requiredLength) {
-            groups = [];
-            if (forwardGroups === true) {
+            if (collectGroups === true) {
               groups = inPort.groups;
-            } else if (forwardGroups !== false) {
+            } else {
               groups = groupedDataGroups[key];
             }
-            atomicOut = new AtomicSender(out, groups);
-            callback = function(err) {
+            for (_o = 0, _len6 = inPorts.length; _o < _len6; _o++) {
+              p = inPorts[_o];
+              component.inPorts[p].groups = [];
+            }
+            outs = {};
+            for (_p = 0, _len7 = outPorts.length; _p < _len7; _p++) {
+              name = outPorts[_p];
+              if (config.async || config.sendStreams && config.sendStreams.indexOf(name) !== -1) {
+                outs[name] = new StreamSender(component.outPorts[name], config.ordered);
+              } else {
+                outs[name] = component.outPorts[name];
+              }
+            }
+            if (outPorts.length === 1) {
+              outs = outs[outPorts[0]];
+            }
+            whenDone = function(err) {
+              var g, out, _len8, _len9, _q, _r;
               if (err) {
                 component.error(err, groups);
               }
               if (typeof component.fail === 'function' && component.hasErrors) {
                 component.fail();
               }
-              atomicOut.disconnect();
-              return delete groupedData[key];
+              if (outPorts.length === 1) {
+                if (config.forwardGroups) {
+                  for (_q = 0, _len8 = groups.length; _q < _len8; _q++) {
+                    g = groups[_q];
+                    outs.endGroup();
+                  }
+                }
+                outs.disconnect();
+              } else {
+                for (name in outs) {
+                  out = outs[name];
+                  if (config.forwardGroups) {
+                    for (_r = 0, _len9 = groups.length; _r < _len9; _r++) {
+                      g = groups[_r];
+                      out.endGroup();
+                    }
+                  }
+                  out.disconnect();
+                }
+              }
+              if (typeof component.afterProcess === 'function') {
+                return component.afterProcess(err || component.hasErrors, outs);
+              }
             };
-            if (config.async) {
-              return func(groupedData[key], groups, atomicOut, callback);
-            } else {
-              func(groupedData[key], groups, atomicOut);
-              return callback();
+            data = groupedData[key];
+            delete groupedData[key];
+            delete groupedDataGroups[key];
+            if (typeof component.beforeProcess === 'function') {
+              component.beforeProcess(outs);
             }
+            if (outPorts.length === 1) {
+              if (config.forwardGroups) {
+                for (_q = 0, _len8 = groups.length; _q < _len8; _q++) {
+                  g = groups[_q];
+                  outs.beginGroup(g);
+                }
+              }
+            } else {
+              for (name in outs) {
+                out = outs[name];
+                if (config.forwardGroups) {
+                  for (_r = 0, _len9 = groups.length; _r < _len9; _r++) {
+                    g = groups[_r];
+                    out.beginGroup(g);
+                  }
+                }
+              }
+            }
+            if (config.async) {
+              postpone = function() {};
+              resume = function() {};
+              postponedToQ = false;
+              task = function() {
+                return proc.call(component, data, groups, outs, whenDone, postpone, resume);
+              };
+              postpone = function(backToQueue) {
+                if (backToQueue == null) {
+                  backToQueue = true;
+                }
+                postponedToQ = backToQueue;
+                if (backToQueue) {
+                  return taskQ.push(task);
+                }
+              };
+              resume = function() {
+                if (postponedToQ) {
+                  return resumeTaskQ();
+                } else {
+                  return task();
+                }
+              };
+            } else {
+              task = function() {
+                proc.call(component, data, groups, outs);
+                return whenDone();
+              };
+            }
+            taskQ.push(task);
+            return resumeTaskQ();
           }
       }
     };
   };
-  for (_j = 0, _len1 = inPorts.length; _j < _len1; _j++) {
-    port = inPorts[_j];
-    _fn(port);
+  for (_m = 0, _len4 = inPorts.length; _m < _len4; _m++) {
+    port = inPorts[_m];
+    _fn1(port);
   }
   return component;
 };
+
+exports.GroupedInput = exports.WirePattern;
+
+exports.CustomError = function(message, options) {
+  var err;
+  err = new Error(message);
+  return exports.CustomizeError(err, options);
+};
+
+exports.CustomizeError = function(err, options) {
+  var key, val;
+  for (key in options) {
+    if (!__hasProp.call(options, key)) continue;
+    val = options[key];
+    err[key] = val;
+  }
+  return err;
+};
+
+exports.MultiError = function(component, group, errorPort) {
+  if (group == null) {
+    group = '';
+  }
+  if (errorPort == null) {
+    errorPort = 'error';
+  }
+  if (!(errorPort in component.outPorts)) {
+    throw new Error("Missing error port '" + errorPort + "'");
+  }
+  component.hasErrors = false;
+  component.errors = [];
+  component.error = function(e, groups) {
+    if (groups == null) {
+      groups = [];
+    }
+    component.errors.push({
+      err: e,
+      groups: groups
+    });
+    return component.hasErrors = true;
+  };
+  component.fail = function(e, groups) {
+    var error, grp, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2;
+    if (e == null) {
+      e = null;
+    }
+    if (groups == null) {
+      groups = [];
+    }
+    if (e) {
+      component.error(e, groups);
+    }
+    if (!component.hasErrors) {
+      return;
+    }
+    if (group) {
+      component.outPorts[errorPort].beginGroup(group);
+    }
+    _ref = component.errors;
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      error = _ref[_i];
+      _ref1 = error.groups;
+      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
+        grp = _ref1[_j];
+        component.outPorts[errorPort].beginGroup(grp);
+      }
+      component.outPorts[errorPort].send(error.err);
+      _ref2 = error.groups;
+      for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
+        grp = _ref2[_k];
+        component.outPorts[errorPort].endGroup();
+      }
+    }
+    if (group) {
+      component.outPorts[errorPort].endGroup();
+    }
+    component.outPorts[errorPort].disconnect();
+    component.hasErrors = false;
+    return component.errors = [];
+  };
+  return component;
+};
+
+});
+require.register("noflo-noflo/src/lib/Streams.js", function(exports, require, module){
+var IP, StreamReceiver, StreamSender, Substream;
+
+IP = (function() {
+  function IP(data) {
+    this.data = data;
+  }
+
+  IP.prototype.sendTo = function(port) {
+    return port.send(this.data);
+  };
+
+  IP.prototype.getValue = function() {
+    return this.data;
+  };
+
+  IP.prototype.toObject = function() {
+    return this.data;
+  };
+
+  return IP;
+
+})();
+
+exports.IP = IP;
+
+Substream = (function() {
+  function Substream(key) {
+    this.key = key;
+    this.value = [];
+  }
+
+  Substream.prototype.push = function(value) {
+    return this.value.push(value);
+  };
+
+  Substream.prototype.sendTo = function(port) {
+    var ip, _i, _len, _ref;
+    port.beginGroup(this.key);
+    _ref = this.value;
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      ip = _ref[_i];
+      if (ip instanceof Substream || ip instanceof IP) {
+        ip.sendTo(port);
+      } else {
+        port.send(ip);
+      }
+    }
+    return port.endGroup();
+  };
+
+  Substream.prototype.getKey = function() {
+    return this.key;
+  };
+
+  Substream.prototype.getValue = function() {
+    var hasKeys, ip, obj, res, val, _i, _len, _ref;
+    switch (this.value.length) {
+      case 0:
+        return null;
+      case 1:
+        if (typeof this.value[0].getValue === 'function') {
+          if (this.value[0] instanceof Substream) {
+            obj = {};
+            obj[this.value[0].key] = this.value[0].getValue();
+            return obj;
+          } else {
+            return this.value[0].getValue();
+          }
+        } else {
+          return this.value[0];
+        }
+        break;
+      default:
+        res = [];
+        hasKeys = false;
+        _ref = this.value;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          ip = _ref[_i];
+          val = typeof ip.getValue === 'function' ? ip.getValue() : ip;
+          if (ip instanceof Substream) {
+            obj = {};
+            obj[ip.key] = ip.getValue();
+            res.push(obj);
+          } else {
+            res.push(val);
+          }
+        }
+        return res;
+    }
+  };
+
+  Substream.prototype.toObject = function() {
+    var obj;
+    obj = {};
+    obj[this.key] = this.getValue();
+    return obj;
+  };
+
+  return Substream;
+
+})();
+
+exports.Substream = Substream;
+
+StreamSender = (function() {
+  function StreamSender(port, ordered) {
+    this.port = port;
+    this.ordered = ordered != null ? ordered : false;
+    this.q = [];
+    this.resetCurrent();
+    this.resolved = false;
+  }
+
+  StreamSender.prototype.resetCurrent = function() {
+    this.level = 0;
+    this.current = null;
+    return this.stack = [];
+  };
+
+  StreamSender.prototype.beginGroup = function(group) {
+    var stream;
+    this.level++;
+    stream = new Substream(group);
+    this.stack.push(stream);
+    this.current = stream;
+    return this;
+  };
+
+  StreamSender.prototype.endGroup = function() {
+    var parent, value;
+    if (this.level > 0) {
+      this.level--;
+    }
+    value = this.stack.pop();
+    if (this.level === 0) {
+      this.q.push(value);
+      this.resetCurrent();
+    } else {
+      parent = this.stack[this.stack.length - 1];
+      parent.push(value);
+      this.current = parent;
+    }
+    return this;
+  };
+
+  StreamSender.prototype.send = function(data) {
+    if (this.level === 0) {
+      this.q.push(new IP(data));
+    } else {
+      this.current.push(new IP(data));
+    }
+    return this;
+  };
+
+  StreamSender.prototype.disconnect = function() {
+    if (this.ordered) {
+      this.resolved = true;
+    } else {
+      this.flush();
+    }
+    return this;
+  };
+
+  StreamSender.prototype.flush = function() {
+    var ip, res, _i, _len, _ref;
+    res = false;
+    if (this.q.length > 0) {
+      this.port.connect();
+      _ref = this.q;
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        ip = _ref[_i];
+        ip.sendTo(this.port);
+      }
+      this.port.disconnect();
+      res = true;
+    }
+    this.q = [];
+    return res;
+  };
+
+  StreamSender.prototype.isAttached = function() {
+    return this.port.isAttached();
+  };
+
+  return StreamSender;
+
+})();
+
+exports.StreamSender = StreamSender;
+
+StreamReceiver = (function() {
+  function StreamReceiver(port, buffered, process) {
+    this.port = port;
+    this.buffered = buffered != null ? buffered : false;
+    this.process = process != null ? process : null;
+    this.q = [];
+    this.resetCurrent();
+    this.port.process = (function(_this) {
+      return function(event, payload, index) {
+        var stream;
+        switch (event) {
+          case 'connect':
+            if (typeof _this.process === 'function') {
+              return _this.process('connect', index);
+            }
+            break;
+          case 'begingroup':
+            _this.level++;
+            stream = new Substream(payload);
+            if (_this.level === 1) {
+              _this.root = stream;
+              _this.parent = null;
+            } else {
+              _this.parent = _this.current;
+            }
+            return _this.current = stream;
+          case 'endgroup':
+            if (_this.level > 0) {
+              _this.level--;
+            }
+            if (_this.level === 0) {
+              if (_this.buffered) {
+                _this.q.push(_this.root);
+                _this.process('readable', index);
+              } else {
+                if (typeof _this.process === 'function') {
+                  _this.process('data', _this.root, index);
+                }
+              }
+              return _this.resetCurrent();
+            } else {
+              _this.parent.push(_this.current);
+              return _this.current = _this.parent;
+            }
+            break;
+          case 'data':
+            if (_this.level === 0) {
+              return _this.q.push(new IP(payload));
+            } else {
+              return _this.current.push(new IP(payload));
+            }
+            break;
+          case 'disconnect':
+            if (typeof _this.process === 'function') {
+              return _this.process('disconnect', index);
+            }
+        }
+      };
+    })(this);
+  }
+
+  StreamReceiver.prototype.resetCurrent = function() {
+    this.level = 0;
+    this.root = null;
+    this.current = null;
+    return this.parent = null;
+  };
+
+  StreamReceiver.prototype.read = function() {
+    if (this.q.length === 0) {
+      return void 0;
+    }
+    return this.q.shift();
+  };
+
+  return StreamReceiver;
+
+})();
+
+exports.StreamReceiver = StreamReceiver;
 
 });
 require.register("noflo-noflo/src/components/Graph.js", function(exports, require, module){
@@ -8143,6 +8710,7 @@ Graph = (function(_super) {
 
   Graph.prototype.createNetwork = function(graph) {
     this.description = graph.properties.description || '';
+    this.icon = graph.properties.icon || this.icon;
     graph.componentLoader = this.loader;
     return noflo.createNetwork(graph, (function(_this) {
       return function(network) {
@@ -9697,131 +10265,62 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-core/components/Repeat.js", function(exports, require, module){
-var Repeat, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo;
 
 noflo = require('noflo');
 
-Repeat = (function(_super) {
-  __extends(Repeat, _super);
-
-  Repeat.prototype.description = 'Forwards packets and metadata in the same way it receives them';
-
-  Repeat.prototype.icon = 'forward';
-
-  function Repeat() {
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'all',
-        description: 'Packet to be forwarded'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'all'
-      }
-    });
-    this.inPorts["in"].on('connect', (function(_this) {
-      return function() {
-        return _this.outPorts.out.connect();
-      };
-    })(this));
-    this.inPorts["in"].on('begingroup', (function(_this) {
-      return function(group) {
-        return _this.outPorts.out.beginGroup(group);
-      };
-    })(this));
-    this.inPorts["in"].on('data', (function(_this) {
-      return function(data) {
-        return _this.outPorts.out.send(data);
-      };
-    })(this));
-    this.inPorts["in"].on('endgroup', (function(_this) {
-      return function() {
-        return _this.outPorts.out.endGroup();
-      };
-    })(this));
-    this.inPorts["in"].on('disconnect', (function(_this) {
-      return function() {
-        return _this.outPorts.out.disconnect();
-      };
-    })(this));
-  }
-
-  return Repeat;
-
-})(noflo.Component);
-
 exports.getComponent = function() {
-  return new Repeat();
+  var c;
+  c = new noflo.Component;
+  c.description = 'Forwards packets and metadata in the same way it receives them';
+  c.icon = 'forward';
+  c.inPorts.add('in', {
+    datatype: 'all',
+    description: 'Packet to forward'
+  });
+  c.outPorts.add('out', {
+    datatype: 'all'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": ['in'],
+    out: 'out',
+    forwardGroups: true
+  }, function(data, groups, out) {
+    return out.send(data);
+  });
+  return c;
 };
 
 });
 require.register("noflo-noflo-core/components/RepeatAsync.js", function(exports, require, module){
-var RepeatAsync, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo;
 
 noflo = require('noflo');
 
-RepeatAsync = (function(_super) {
-  __extends(RepeatAsync, _super);
-
-  RepeatAsync.prototype.description = "Like 'Repeat', except repeat on next tick";
-
-  RepeatAsync.prototype.icon = 'step-forward';
-
-  function RepeatAsync() {
-    this.groups = [];
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'all'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'all'
-      }
-    });
-    this.inPorts["in"].on('begingroup', (function(_this) {
-      return function(group) {
-        return _this.groups.push(group);
-      };
-    })(this));
-    this.inPorts["in"].on('data', (function(_this) {
-      return function(data) {
-        var groups, later;
-        groups = _this.groups;
-        later = function() {
-          var group, _i, _j, _len, _len1;
-          for (_i = 0, _len = groups.length; _i < _len; _i++) {
-            group = groups[_i];
-            _this.outPorts.out.beginGroup(group);
-          }
-          _this.outPorts.out.send(data);
-          for (_j = 0, _len1 = groups.length; _j < _len1; _j++) {
-            group = groups[_j];
-            _this.outPorts.out.endGroup();
-          }
-          return _this.outPorts.out.disconnect();
-        };
-        return setTimeout(later, 0);
-      };
-    })(this));
-    this.inPorts["in"].on('disconnect', (function(_this) {
-      return function() {
-        return _this.groups = [];
-      };
-    })(this));
-  }
-
-  return RepeatAsync;
-
-})(noflo.Component);
-
 exports.getComponent = function() {
-  return new RepeatAsync;
+  var c;
+  c = new noflo.Component;
+  c.description = "Like 'Repeat', except repeat on next tick";
+  c.icon = 'step-forward';
+  c.inPorts.add('in', {
+    datatype: 'all',
+    description: 'Packet to forward'
+  });
+  c.outPorts.add('out', {
+    datatype: 'all'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": ['in'],
+    out: 'out',
+    forwardGroups: true,
+    async: true
+  }, function(data, groups, out, callback) {
+    return setTimeout(function() {
+      out.send(data);
+      return callback();
+    }, 0);
+  });
+  return c;
 };
 
 });
@@ -9924,6 +10423,10 @@ SendNext = (function(_super) {
     this.outPorts = new noflo.OutPorts({
       out: {
         datatype: 'all'
+      },
+      empty: {
+        datatype: 'bang',
+        required: false
       }
     });
     this.inPorts["in"].on('data', (function(_this) {
@@ -9939,6 +10442,8 @@ SendNext = (function(_super) {
     while (true) {
       packet = this.inPorts.data.receive();
       if (!packet) {
+        this.outPorts.empty.send(true);
+        this.outPorts.empty.disconnect();
         break;
       }
       groups = [];
@@ -11405,7 +11910,7 @@ SplitArray = (function(_super) {
   function SplitArray() {
     this.inPorts = new noflo.InPorts({
       "in": {
-        datatype: 'all'
+        datatype: 'array'
       }
     });
     this.outPorts = new noflo.OutPorts({
@@ -12071,6 +12576,7 @@ GetObjectKey = (function(_super) {
 
   function GetObjectKey() {
     this.sendGroup = true;
+    this.groups = [];
     this.data = [];
     this.key = [];
     this.inPorts = new noflo.InPorts({
@@ -12094,11 +12600,13 @@ GetObjectKey = (function(_super) {
       },
       object: {
         datatype: 'object',
-        description: 'Object forwarded from input if at least one property matches the input keys'
+        description: 'Object forwarded from input if at least one property matches the input keys',
+        required: false
       },
       missed: {
         datatype: 'object',
-        description: 'Object forwarded from input if no property matches the input keys'
+        description: 'Object forwarded from input if no property matches the input keys',
+        required: false
       }
     });
     this.inPorts["in"].on('connect', (function(_this) {
@@ -12108,20 +12616,27 @@ GetObjectKey = (function(_super) {
     })(this));
     this.inPorts["in"].on('begingroup', (function(_this) {
       return function(group) {
-        return _this.outPorts.out.beginGroup(group);
+        return _this.groups.push(group);
       };
     })(this));
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
         if (_this.key.length) {
-          return _this.getKey(data);
+          _this.getKey({
+            data: data,
+            groups: _this.groups
+          });
+          return;
         }
-        return _this.data.push(data);
+        return _this.data.push({
+          data: data,
+          groups: _this.groups.slice(0)
+        });
       };
     })(this));
     this.inPorts["in"].on('endgroup', (function(_this) {
       return function() {
-        return _this.outPorts.out.endGroup();
+        return _this.groups.pop();
       };
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
@@ -12129,6 +12644,7 @@ GetObjectKey = (function(_super) {
         var data, _i, _len, _ref;
         if (!_this.data.length) {
           _this.outPorts.out.disconnect();
+          _this.outPorts.object.disconnect();
           return;
         }
         if (!_this.key.length) {
@@ -12140,9 +12656,7 @@ GetObjectKey = (function(_super) {
           _this.getKey(data);
         }
         _this.outPorts.out.disconnect();
-        if (_this.outPorts.object.isAttached()) {
-          return _this.outPorts.object.disconnect();
-        }
+        return _this.outPorts.object.disconnect();
       };
     })(this));
     this.inPorts.key.on('data', (function(_this) {
@@ -12162,7 +12676,8 @@ GetObjectKey = (function(_super) {
           _this.getKey(data);
         }
         _this.data = [];
-        return _this.outPorts.out.disconnect();
+        _this.outPorts.out.disconnect();
+        return _this.outPorts.object.disconnect();
       };
     })(this));
     this.inPorts.sendgroup.on('data', (function(_this) {
@@ -12173,16 +12688,13 @@ GetObjectKey = (function(_super) {
   }
 
   GetObjectKey.prototype.error = function(data, error) {
-    if (this.outPorts.missed.isAttached()) {
-      this.outPorts.missed.send(data);
-      this.outPorts.missed.disconnect();
-      return;
-    }
-    throw error;
+    this.outPorts.missed.send(data);
+    return this.outPorts.missed.disconnect();
   };
 
-  GetObjectKey.prototype.getKey = function(data) {
-    var key, _i, _len, _ref;
+  GetObjectKey.prototype.getKey = function(_arg) {
+    var data, group, groups, key, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _results;
+    data = _arg.data, groups = _arg.groups;
     if (!this.key.length) {
       this.error(data, new Error('Key not defined'));
       return;
@@ -12202,6 +12714,10 @@ GetObjectKey = (function(_super) {
         this.error(data, new Error("Object has no key " + key));
         continue;
       }
+      for (_j = 0, _len1 = groups.length; _j < _len1; _j++) {
+        group = groups[_j];
+        this.outPorts.out.beginGroup(group);
+      }
       if (this.sendGroup) {
         this.outPorts.out.beginGroup(key);
       }
@@ -12209,11 +12725,22 @@ GetObjectKey = (function(_super) {
       if (this.sendGroup) {
         this.outPorts.out.endGroup();
       }
+      for (_k = 0, _len2 = groups.length; _k < _len2; _k++) {
+        group = groups[_k];
+        this.outPorts.out.endGroup();
+      }
     }
-    if (!this.outPorts.object.isAttached()) {
-      return;
+    for (_l = 0, _len3 = groups.length; _l < _len3; _l++) {
+      group = groups[_l];
+      this.outPorts.object.beginGroup(group);
     }
-    return this.outPorts.object.send(data);
+    this.outPorts.object.send(data);
+    _results = [];
+    for (_m = 0, _len4 = groups.length; _m < _len4; _m++) {
+      group = groups[_m];
+      _results.push(this.outPorts.object.endGroup());
+    }
+    return _results;
   };
 
   return GetObjectKey;
@@ -12226,41 +12753,27 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/UniqueArray.js", function(exports, require, module){
-var UniqueArray, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo;
 
 noflo = require('noflo');
 
-UniqueArray = (function(_super) {
-  __extends(UniqueArray, _super);
-
-  function UniqueArray() {
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'array',
-        description: 'Array to get unique values from'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'array',
-        description: 'Array containing only unique values from the input array'
-      }
-    });
-    this.inPorts["in"].on('data', (function(_this) {
-      return function(data) {
-        return _this.outPorts.out.send(_this.unique(data));
-      };
-    })(this));
-    this.inPorts["in"].on('disconnect', (function(_this) {
-      return function() {
-        return _this.outPorts.out.disconnect();
-      };
-    })(this));
-  }
-
-  UniqueArray.prototype.unique = function(array) {
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.icon = 'empire';
+  c.inPorts.add('in', {
+    datatype: 'array',
+    description: 'Array to get unique values from'
+  });
+  c.outPorts.add('out', {
+    datatype: 'array',
+    description: 'Array containing only unique values from the input array'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": 'in',
+    out: 'out',
+    forwardGroups: true
+  }, function(array, groups, out) {
     var member, newArray, seen, _i, _len;
     seen = {};
     newArray = [];
@@ -12271,15 +12784,9 @@ UniqueArray = (function(_super) {
     for (member in seen) {
       newArray.push(member);
     }
-    return newArray;
-  };
-
-  return UniqueArray;
-
-})(noflo.Component);
-
-exports.getComponent = function() {
-  return new UniqueArray;
+    return out.send(newArray);
+  });
+  return c;
 };
 
 });
@@ -12683,7 +13190,6 @@ SetPropertyValue = (function(_super) {
 
   function SetPropertyValue() {
     this.property = null;
-    this.value = null;
     this.data = [];
     this.groups = [];
     this.keep = false;
@@ -13676,7 +14182,7 @@ module.exports = {
     "flow"
   ],
   "repo": "noflo/noflo",
-  "version": "0.5.1",
+  "version": "0.5.6",
   "dependencies": {
     "bergie/emitter": "*",
     "jashkenas/underscore": "*",
@@ -13707,6 +14213,7 @@ module.exports = {
     "src/lib/Journal.js",
     "src/lib/Utils.js",
     "src/lib/Helpers.js",
+    "src/lib/Streams.js",
     "src/components/Graph.js"
   ],
   "json": [
@@ -13840,7 +14347,6 @@ module.exports = {
     }
   }
 }
-
 });
 require.register("noflo-noflo-css/component.json", function(exports, require, module){
 module.exports = {
@@ -13954,7 +14460,6 @@ module.exports = {
     }
   }
 }
-
 });
 require.register("noflo-noflo-math/component.json", function(exports, require, module){
 module.exports = {
@@ -14031,6 +14536,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "bar/deps/noflo/src/lib/Platfor
 require.alias("noflo-noflo/src/lib/Journal.js", "bar/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "bar/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "bar/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "bar/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "bar/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "bar/deps/noflo/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo/index.js");
@@ -14077,6 +14583,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "noflo-noflo-dom/deps/noflo/src
 require.alias("noflo-noflo/src/lib/Journal.js", "noflo-noflo-dom/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "noflo-noflo-dom/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "noflo-noflo-dom/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "noflo-noflo-dom/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "noflo-noflo-dom/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-dom/deps/noflo/index.js");
 require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
@@ -14123,6 +14630,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "noflo-noflo-core/deps/noflo/sr
 require.alias("noflo-noflo/src/lib/Journal.js", "noflo-noflo-core/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "noflo-noflo-core/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "noflo-noflo-core/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "noflo-noflo-core/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "noflo-noflo-core/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-core/deps/noflo/index.js");
 require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
@@ -14160,6 +14668,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "noflo-noflo-css/deps/noflo/src
 require.alias("noflo-noflo/src/lib/Journal.js", "noflo-noflo-css/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "noflo-noflo-css/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "noflo-noflo-css/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "noflo-noflo-css/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "noflo-noflo-css/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-css/deps/noflo/index.js");
 require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
@@ -14218,6 +14727,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "noflo-noflo-objects/deps/noflo
 require.alias("noflo-noflo/src/lib/Journal.js", "noflo-noflo-objects/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "noflo-noflo-objects/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "noflo-noflo-objects/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "noflo-noflo-objects/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "noflo-noflo-objects/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-objects/deps/noflo/index.js");
 require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
@@ -14265,6 +14775,7 @@ require.alias("noflo-noflo/src/lib/Platform.js", "noflo-noflo-math/deps/noflo/sr
 require.alias("noflo-noflo/src/lib/Journal.js", "noflo-noflo-math/deps/noflo/src/lib/Journal.js");
 require.alias("noflo-noflo/src/lib/Utils.js", "noflo-noflo-math/deps/noflo/src/lib/Utils.js");
 require.alias("noflo-noflo/src/lib/Helpers.js", "noflo-noflo-math/deps/noflo/src/lib/Helpers.js");
+require.alias("noflo-noflo/src/lib/Streams.js", "noflo-noflo-math/deps/noflo/src/lib/Streams.js");
 require.alias("noflo-noflo/src/components/Graph.js", "noflo-noflo-math/deps/noflo/src/components/Graph.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-math/deps/noflo/index.js");
 require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
