@@ -19,6 +19,7 @@ module.exports = function(grunt) {
       require: true,
       development: false,
       debug: false,
+      ide: 'http://app.flowhub.io',
       concurrency: 10,
       plugins: [
         'component-json',
@@ -56,6 +57,7 @@ module.exports = function(grunt) {
             name: graphName,
             scripts: scripts,
             lib: manifest.name,
+            ideUrl: options.ide,
             noflo: destPath,
             graphPath: manifest.name + '/' + manifest.noflo.graphs[graphName],
             content: graph.properties.environment.content

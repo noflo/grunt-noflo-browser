@@ -22,7 +22,7 @@
         var rt = runtime(null, runtimeOptions);
         window.rt = rt;
         console.log('WebRTC id is', rt.id);
-        var ide = 'http://flowhub.io';
+        var ide = '<%= ideUrl %>';
         var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.id);
         document.getElementById('flowhub_debug_url').href = debugUrl;
         rt.network.on('addnetwork', function () {

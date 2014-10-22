@@ -49,6 +49,12 @@ Default value: `false`
 
 Whether to enable debugging using Flowhub over WebRTC.
 
+### options.ide
+Type: `String`
+Default value: `http://app.flowhub.io`
+
+Which IDE instance to use for live-mode debugging url.
+
 ### Usage Examples
 
 #### A typical browser build
