@@ -18,6 +18,7 @@ module.exports = function(grunt) {
     var options = this.options({
       require: true,
       development: false,
+      debug: false,
       concurrency: 10,
       plugins: [
         'component-json',
@@ -32,7 +33,8 @@ module.exports = function(grunt) {
     var done = this.async();
     var todo = 0;
 
-    var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/graph.html'));
+    var templateName = (options.debug) ? "graphDebug" : "graph";
+    var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
     var writeGraphFiles = function (manifest, scripts, srcDir, destDir, destPath) {
       if (!manifest.noflo || !manifest.noflo.graphs) {
         return;
