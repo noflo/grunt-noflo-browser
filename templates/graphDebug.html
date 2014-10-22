@@ -4,10 +4,11 @@
     <meta charset="utf-8">
     <title><%= name %></title><% _.forEach(scripts, function (path) { %>
     <script src="<%= path %>"></script><% }); %>
+    <script src="http://cdn.rawgit.com/rtc-io/rtc/v3.1.1/dist/rtc.js"></script>
     <script src="<%= noflo %>"></script>
   </head>
   <body>
-    <a id='flowhub_debug_url' style='display:none;'></a>
+    <a id='flowhub_debug_url'>Debug in Flowhub</a>
     <%= content %>
     <script>
       var noflo = require('noflo');
@@ -15,14 +16,16 @@
       noflo.graph.loadJSON(require('<%= graphPath %>'), function (graph) {
         graph.baseDir = '/<%= lib %>';
         var runtimeOptions = {
-            defaultGraph: graph
+            defaultGraph: graph,
             baseDir: graph.baseDir
         };
         var rt = runtime(null, runtimeOptions);
+        window.rt = rt;
         console.log('WebRTC id is', rt.id);
         var ide = 'http://flowhub.io';
         var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.id);
-        rt.network.on('addnetwork', function) {
+        document.getElementById('flowhub_debug_url').href = debugUrl;
+        rt.network.on('addnetwork', function () {
             console.log('<%= name %> is running!');
         });
       });
