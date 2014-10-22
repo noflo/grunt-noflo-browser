@@ -367,7 +367,7 @@ Emitter.prototype.hasListeners = function(event){
 
 });
 require.register("jashkenas-underscore/underscore.js", function(exports, require, module){
-//     Underscore.js 1.6.0
+//     Underscore.js 1.7.0
 //     http://underscorejs.org
 //     (c) 2009-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
 //     Underscore may be freely distributed under the MIT license.
@@ -390,7 +390,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   var
     push             = ArrayProto.push,
     slice            = ArrayProto.slice,
-    concat           = ArrayProto.concat,
     toString         = ObjProto.toString,
     hasOwnProperty   = ObjProto.hasOwnProperty;
 
@@ -410,8 +409,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Export the Underscore object for **Node.js**, with
   // backwards-compatibility for the old `require()` API. If we're in
-  // the browser, add `_` as a global object via a string identifier,
-  // for Closure Compiler "advanced" mode.
+  // the browser, add `_` as a global object.
   if (typeof exports !== 'undefined') {
     if (typeof module !== 'undefined' && module.exports) {
       exports = module.exports = _;
@@ -422,10 +420,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   }
 
   // Current version.
-  _.VERSION = '1.6.0';
+  _.VERSION = '1.7.0';
 
-  // Internal function: creates a callback bound to its context if supplied
-  var createCallback = function(func, context, argCount) {
+  // Internal function that returns an efficient (for current engines) version
+  // of the passed-in callback, to be repeatedly applied in other Underscore
+  // functions.
+  var optimizeCb = function(func, context, argCount) {
     if (context === void 0) return func;
     switch (argCount == null ? 3 : argCount) {
       case 1: return function(value) {
@@ -446,12 +446,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   };
 
-  // An internal function to generate lookup iterators.
-  var lookupIterator = function(value, context, argCount) {
+  // A mostly-internal function to generate callbacks that can be applied
+  // to each element in a collection, returning the desired result — either
+  // identity, an arbitrary callback, a property matcher, or a property accessor.
+  var cb = function(value, context, argCount) {
     if (value == null) return _.identity;
-    if (_.isFunction(value)) return createCallback(value, context, argCount);
+    if (_.isFunction(value)) return optimizeCb(value, context, argCount);
     if (_.isObject(value)) return _.matches(value);
     return _.property(value);
+  };
+  _.iteratee = function(value, context) {
+    return cb(value, context);
   };
 
   // Collection Functions
@@ -460,37 +465,34 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // The cornerstone, an `each` implementation, aka `forEach`.
   // Handles raw objects in addition to array-likes. Treats all
   // sparse array-likes as if they were dense.
-  _.each = _.forEach = function(obj, iterator, context) {
+  _.each = _.forEach = function(obj, iteratee, context) {
     if (obj == null) return obj;
-    iterator = createCallback(iterator, context);
+    iteratee = optimizeCb(iteratee, context);
     var i, length = obj.length;
     if (length === +length) {
       for (i = 0; i < length; i++) {
-        iterator(obj[i], i, obj);
+        iteratee(obj[i], i, obj);
       }
     } else {
       var keys = _.keys(obj);
       for (i = 0, length = keys.length; i < length; i++) {
-        iterator(obj[keys[i]], keys[i], obj);
+        iteratee(obj[keys[i]], keys[i], obj);
       }
     }
     return obj;
   };
 
-  // Return the results of applying the iterator to each element.
-  _.map = _.collect = function(obj, iterator, context) {
+  // Return the results of applying the iteratee to each element.
+  _.map = _.collect = function(obj, iteratee, context) {
     if (obj == null) return [];
-    iterator = lookupIterator(iterator, context);
-    var length = obj.length,
-        currentKey, keys;
-    if (length !== +length) {
-      keys = _.keys(obj);
-      length = keys.length;
-    }
-    var results = Array(length);
+    iteratee = cb(iteratee, context);
+    var keys = obj.length !== +obj.length && _.keys(obj),
+        length = (keys || obj).length,
+        results = Array(length),
+        currentKey;
     for (var index = 0; index < length; index++) {
       currentKey = keys ? keys[index] : index;
-      results[index] = iterator(obj[currentKey], currentKey, obj);
+      results[index] = iteratee(obj[currentKey], currentKey, obj);
     }
     return results;
   };
@@ -499,43 +501,37 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`.
-  _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
+  _.reduce = _.foldl = _.inject = function(obj, iteratee, memo, context) {
     if (obj == null) obj = [];
-    iterator = createCallback(iterator, context, 4);
-    var index = 0, length = obj.length,
-        currentKey, keys;
-    if (length !== +length) {
-      keys = _.keys(obj);
-      length = keys.length;
-    }
+    iteratee = optimizeCb(iteratee, context, 4);
+    var keys = obj.length !== +obj.length && _.keys(obj),
+        length = (keys || obj).length,
+        index = 0, currentKey;
     if (arguments.length < 3) {
-      if (!length) throw TypeError(reduceError);
+      if (!length) throw new TypeError(reduceError);
       memo = obj[keys ? keys[index++] : index++];
     }
     for (; index < length; index++) {
       currentKey = keys ? keys[index] : index;
-      memo = iterator(memo, obj[currentKey], currentKey, obj);
+      memo = iteratee(memo, obj[currentKey], currentKey, obj);
     }
     return memo;
   };
 
   // The right-associative version of reduce, also known as `foldr`.
-  _.reduceRight = _.foldr = function(obj, iterator, memo, context) {
+  _.reduceRight = _.foldr = function(obj, iteratee, memo, context) {
     if (obj == null) obj = [];
-    iterator = createCallback(iterator, context, 4);
-    var index = obj.length,
-        currentKey, keys;
-    if (index !== +index) {
-      keys = _.keys(obj);
-      index = keys.length;
-    }
+    iteratee = optimizeCb(iteratee, context, 4);
+    var keys = obj.length !== + obj.length && _.keys(obj),
+        index = (keys || obj).length,
+        currentKey;
     if (arguments.length < 3) {
-      if (!index) throw TypeError(reduceError);
+      if (!index) throw new TypeError(reduceError);
       memo = obj[keys ? keys[--index] : --index];
     }
     while (index--) {
       currentKey = keys ? keys[index] : index;
-      memo = iterator(memo, obj[currentKey], currentKey, obj);
+      memo = iteratee(memo, obj[currentKey], currentKey, obj);
     }
     return memo;
   };
@@ -543,7 +539,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Return the first value which passes a truth test. Aliased as `detect`.
   _.find = _.detect = function(obj, predicate, context) {
     var result;
-    predicate = lookupIterator(predicate, context);
+    predicate = cb(predicate, context);
     _.some(obj, function(value, index, list) {
       if (predicate(value, index, list)) {
         result = value;
@@ -558,7 +554,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.filter = _.select = function(obj, predicate, context) {
     var results = [];
     if (obj == null) return results;
-    predicate = lookupIterator(predicate, context);
+    predicate = cb(predicate, context);
     _.each(obj, function(value, index, list) {
       if (predicate(value, index, list)) results.push(value);
     });
@@ -567,20 +563,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Return all the elements for which a truth test fails.
   _.reject = function(obj, predicate, context) {
-    return _.filter(obj, _.negate(lookupIterator(predicate)), context);
+    return _.filter(obj, _.negate(cb(predicate)), context);
   };
 
   // Determine whether all of the elements match a truth test.
   // Aliased as `all`.
   _.every = _.all = function(obj, predicate, context) {
     if (obj == null) return true;
-    predicate = lookupIterator(predicate, context);
-    var length = obj.length;
-    var index, currentKey, keys;
-    if (length !== +length) {
-      keys = _.keys(obj);
-      length = keys.length;
-    }
+    predicate = cb(predicate, context);
+    var keys = obj.length !== +obj.length && _.keys(obj),
+        length = (keys || obj).length,
+        index, currentKey;
     for (index = 0; index < length; index++) {
       currentKey = keys ? keys[index] : index;
       if (!predicate(obj[currentKey], currentKey, obj)) return false;
@@ -590,17 +583,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Determine if at least one element in the object matches a truth test.
   // Aliased as `any`.
-  // Determine if at least one element in the object matches a truth test.
-  // Aliased as `any`.
   _.some = _.any = function(obj, predicate, context) {
     if (obj == null) return false;
-    predicate = lookupIterator(predicate, context);
-    var length = obj.length;
-    var index, currentKey, keys;
-    if (length !== +length) {
-      keys = _.keys(obj);
-      length = keys.length;
-    }
+    predicate = cb(predicate, context);
+    var keys = obj.length !== +obj.length && _.keys(obj),
+        length = (keys || obj).length,
+        index, currentKey;
     for (index = 0; index < length; index++) {
       currentKey = keys ? keys[index] : index;
       if (predicate(obj[currentKey], currentKey, obj)) return true;
@@ -643,10 +631,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Return the maximum element (or element-based computation).
-  _.max = function(obj, iterator, context) {
+  _.max = function(obj, iteratee, context) {
     var result = -Infinity, lastComputed = -Infinity,
         value, computed;
-    if (!iterator && _.isArray(obj)) {
+    if (iteratee == null && obj != null) {
+      obj = obj.length === +obj.length ? obj : _.values(obj);
       for (var i = 0, length = obj.length; i < length; i++) {
         value = obj[i];
         if (value > result) {
@@ -654,9 +643,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         }
       }
     } else {
-      iterator = lookupIterator(iterator, context);
+      iteratee = cb(iteratee, context);
       _.each(obj, function(value, index, list) {
-        computed = iterator(value, index, list);
+        computed = iteratee(value, index, list);
         if (computed > lastComputed || computed === -Infinity && result === -Infinity) {
           result = value;
           lastComputed = computed;
@@ -667,10 +656,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Return the minimum element (or element-based computation).
-  _.min = function(obj, iterator, context) {
+  _.min = function(obj, iteratee, context) {
     var result = Infinity, lastComputed = Infinity,
         value, computed;
-    if (!iterator && _.isArray(obj)) {
+    if (iteratee == null && obj != null) {
+      obj = obj.length === +obj.length ? obj : _.values(obj);
       for (var i = 0, length = obj.length; i < length; i++) {
         value = obj[i];
         if (value < result) {
@@ -678,9 +668,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         }
       }
     } else {
-      iterator = lookupIterator(iterator, context);
+      iteratee = cb(iteratee, context);
       _.each(obj, function(value, index, list) {
-        computed = iterator(value, index, list);
+        computed = iteratee(value, index, list);
         if (computed < lastComputed || computed === Infinity && result === Infinity) {
           result = value;
           lastComputed = computed;
@@ -690,17 +680,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return result;
   };
 
-  // Shuffle an array, using the modern version of the
+  // Shuffle a collection, using the modern version of the
   // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
   _.shuffle = function(obj) {
-    var rand;
-    var index = 0;
-    var shuffled = [];
-    _.each(obj, function(value) {
-      rand = _.random(index++);
-      shuffled[index - 1] = shuffled[rand];
-      shuffled[rand] = value;
-    });
+    var set = obj && obj.length === +obj.length ? obj : _.values(obj);
+    var length = set.length;
+    var shuffled = Array(length);
+    for (var index = 0, rand; index < length; index++) {
+      rand = _.random(0, index);
+      if (rand !== index) shuffled[index] = shuffled[rand];
+      shuffled[rand] = set[index];
+    }
     return shuffled;
   };
 
@@ -715,14 +705,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return _.shuffle(obj).slice(0, Math.max(0, n));
   };
 
-  // Sort the object's values by a criterion produced by an iterator.
-  _.sortBy = function(obj, iterator, context) {
-    iterator = lookupIterator(iterator, context);
+  // Sort the object's values by a criterion produced by an iteratee.
+  _.sortBy = function(obj, iteratee, context) {
+    iteratee = cb(iteratee, context);
     return _.pluck(_.map(obj, function(value, index, list) {
       return {
         value: value,
         index: index,
-        criteria: iterator(value, index, list)
+        criteria: iteratee(value, index, list)
       };
     }).sort(function(left, right) {
       var a = left.criteria;
@@ -737,11 +727,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // An internal function used for aggregate "group by" operations.
   var group = function(behavior) {
-    return function(obj, iterator, context) {
+    return function(obj, iteratee, context) {
       var result = {};
-      iterator = lookupIterator(iterator, context);
+      iteratee = cb(iteratee, context);
       _.each(obj, function(value, index) {
-        var key = iterator(value, index, obj);
+        var key = iteratee(value, index, obj);
         behavior(result, value, key);
       });
       return result;
@@ -769,13 +759,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Use a comparator function to figure out the smallest index at which
   // an object should be inserted so as to maintain order. Uses binary search.
-  _.sortedIndex = function(array, obj, iterator, context) {
-    iterator = lookupIterator(iterator, context, 1);
-    var value = iterator(obj);
+  _.sortedIndex = function(array, obj, iteratee, context) {
+    iteratee = cb(iteratee, context, 1);
+    var value = iteratee(obj);
     var low = 0, high = array.length;
     while (low < high) {
-      var mid = (low + high) >>> 1;
-      if (iterator(array[mid]) < value) low = mid + 1; else high = mid;
+      var mid = low + high >>> 1;
+      if (iteratee(array[mid]) < value) low = mid + 1; else high = mid;
     }
     return low;
   };
@@ -797,7 +787,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Split a collection into two arrays: one whose elements all satisfy the given
   // predicate, and one whose elements all do not satisfy the predicate.
   _.partition = function(obj, predicate, context) {
-    predicate = lookupIterator(predicate, context);
+    predicate = cb(predicate, context);
     var pass = [], fail = [];
     _.each(obj, function(value, key, obj) {
       (predicate(value, key, obj) ? pass : fail).push(value);
@@ -814,8 +804,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.first = _.head = _.take = function(array, n, guard) {
     if (array == null) return void 0;
     if (n == null || guard) return array[0];
-    if (n < 0) return [];
-    return slice.call(array, 0, n);
+    return _.initial(array, array.length - n);
   };
 
   // Returns everything but the last entry of the array. Especially useful on
@@ -831,7 +820,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.last = function(array, n, guard) {
     if (array == null) return void 0;
     if (n == null || guard) return array[array.length - 1];
-    return slice.call(array, Math.max(array.length - n, 0));
+    return _.rest(array, Math.max(0, array.length - n));
   };
 
   // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
@@ -848,18 +837,20 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Internal implementation of a recursive `flatten` function.
-  var flatten = function(input, shallow, strict, output) {
-    if (shallow && _.every(input, _.isArray)) {
-      return concat.apply(output, input);
-    }
-    for (var i = 0, length = input.length; i < length; i++) {
-      var value = input[i];
-      if (!_.isArray(value) && !_.isArguments(value)) {
-        if (!strict) output.push(value);
-      } else if (shallow) {
-        push.apply(output, value);
-      } else {
-        flatten(value, shallow, strict, output);
+  var flatten = function(input, shallow, strict, startIndex) {
+    var output = [], idx = 0, value;
+    for (var i = startIndex || 0, length = input && input.length; i < length; i++) {
+      value = input[i];
+      if (value && value.length >= 0 && (_.isArray(value) || _.isArguments(value))) {
+        //flatten current level of array or arguments object
+        if (!shallow) value = flatten(value, shallow, strict);
+        var j = 0, len = value.length;
+        output.length += len;
+        while (j < len) {
+          output[idx++] = value[j++];
+        }
+      } else if (!strict) {
+        output[idx++] = value;
       }
     }
     return output;
@@ -867,7 +858,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Flatten out an array, either recursively (by default), or just one level.
   _.flatten = function(array, shallow) {
-    return flatten(array, shallow, false, []);
+    return flatten(array, shallow, false);
   };
 
   // Return a version of the array that does not contain the specified value(s).
@@ -878,23 +869,29 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Produce a duplicate-free version of the array. If the array has already
   // been sorted, you have the option of using a faster algorithm.
   // Aliased as `unique`.
-  _.uniq = _.unique = function(array, isSorted, iterator, context) {
+  _.uniq = _.unique = function(array, isSorted, iteratee, context) {
     if (array == null) return [];
-    if (_.isFunction(isSorted)) {
-      context = iterator;
-      iterator = isSorted;
+    if (!_.isBoolean(isSorted)) {
+      context = iteratee;
+      iteratee = isSorted;
       isSorted = false;
     }
-    if (iterator) iterator = lookupIterator(iterator, context);
+    if (iteratee != null) iteratee = cb(iteratee, context);
     var result = [];
     var seen = [];
     for (var i = 0, length = array.length; i < length; i++) {
-      var value = array[i];
-      if (iterator) value = iterator(value, i, array);
-      if (isSorted ? !i || seen !== value : !_.contains(seen, value)) {
-        if (isSorted) seen = value;
-        else seen.push(value);
-        result.push(array[i]);
+      var value = array[i],
+          computed = iteratee ? iteratee(value, i, array) : value;
+      if (isSorted) {
+        if (!i || seen !== computed) result.push(value);
+        seen = computed;
+      } else if (iteratee) {
+        if (!_.contains(seen, computed)) {
+          seen.push(computed);
+          result.push(value);
+        }
+      } else if (!_.contains(result, value)) {
+        result.push(value);
       }
     }
     return result;
@@ -903,7 +900,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Produce an array that contains the union: each distinct element from all of
   // the passed-in arrays.
   _.union = function() {
-    return _.uniq(flatten(arguments, true, true, []));
+    return _.uniq(flatten(arguments, true, true));
   };
 
   // Produce an array that contains every item shared between all the
@@ -926,7 +923,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Take the difference between one array and a number of other arrays.
   // Only the elements present in just the first array will remain.
   _.difference = function(array) {
-    var rest = flatten(slice.call(arguments, 1), true, true, []);
+    var rest = flatten(arguments, true, true, 1);
     return _.filter(array, function(value){
       return !_.contains(rest, value);
     });
@@ -938,10 +935,16 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     if (array == null) return [];
     var length = _.max(arguments, 'length').length;
     var results = Array(length);
-    for (var i = 0; i < length; i++) {
-      results[i] = _.pluck(arguments, i);
+    while (length-- > 0) {
+      results[length] = _.pluck(arguments, length);
     }
     return results;
+  };
+
+  // Complement of _.zip. Unzip accepts an array of arrays and groups
+  // each array's elements on shared indices
+  _.unzip = function(array) {
+    return _.zip.apply(null, array);
   };
 
   // Converts lists into objects. Pass either a single array of `[key, value]`
@@ -965,23 +968,19 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // If the array is large and already in sort order, pass `true`
   // for **isSorted** to use binary search.
   _.indexOf = function(array, item, isSorted) {
-    if (array == null) return -1;
-    var i = 0, length = array.length;
-    if (isSorted) {
-      if (typeof isSorted == 'number') {
-        i = isSorted < 0 ? Math.max(0, length + isSorted) : isSorted;
-      } else {
-        i = _.sortedIndex(array, item);
-        return array[i] === item ? i : -1;
-      }
+    var i = 0, length = array && array.length;
+    if (typeof isSorted == 'number') {
+      i = isSorted < 0 ? Math.max(0, length + isSorted) : isSorted;
+    } else if (isSorted) {
+      i = _.sortedIndex(array, item);
+      return array[i] === item ? i : -1;
     }
     for (; i < length; i++) if (array[i] === item) return i;
     return -1;
   };
 
   _.lastIndexOf = function(array, item, from) {
-    if (array == null) return -1;
-    var idx = array.length;
+    var idx = array ? array.length : 0;
     if (typeof from == 'number') {
       idx = from < 0 ? idx + from + 1 : Math.min(idx, from + 1);
     }
@@ -1015,24 +1014,28 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Reusable constructor function for prototype setting.
   var Ctor = function(){};
 
+  // Determines whether to execute a function as a constructor
+  // or a normal function with the provided arguments
+  var executeBound = function(sourceFunc, boundFunc, context, callingContext, args) {
+    if (!(callingContext instanceof boundFunc)) return sourceFunc.apply(context, args);
+    Ctor.prototype = sourceFunc.prototype;
+    var self = new Ctor;
+    Ctor.prototype = null;
+    var result = sourceFunc.apply(self, args);
+    if (_.isObject(result)) return result;
+    return self;
+  };
+
   // Create a function bound to a given object (assigning `this`, and arguments,
   // optionally). Delegates to **ECMAScript 5**'s native `Function.bind` if
   // available.
   _.bind = function(func, context) {
-    var args, bound;
     if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
     if (!_.isFunction(func)) throw TypeError('Bind must be called on a function');
-    args = slice.call(arguments, 2);
-    bound = function() {
-      if (!(this instanceof bound)) return func.apply(context, args.concat(slice.call(arguments)));
-      Ctor.prototype = func.prototype;
-      var self = new Ctor;
-      Ctor.prototype = null;
-      var result = func.apply(self, args.concat(slice.call(arguments)));
-      if (Object(result) === result) return result;
-      return self;
+    var args = slice.call(arguments, 2);
+    return function bound() {
+      return executeBound(func, bound, context, this, args.concat(slice.call(arguments)));
     };
-    return bound;
   };
 
   // Partially apply a function by creating a version that has had some of its
@@ -1040,14 +1043,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // as a placeholder, allowing any combination of arguments to be pre-filled.
   _.partial = function(func) {
     var boundArgs = slice.call(arguments, 1);
-    return function() {
+    return function bound() {
       var position = 0;
       var args = boundArgs.slice();
       for (var i = 0, length = args.length; i < length; i++) {
         if (args[i] === _) args[i] = arguments[position++];
       }
       while (position < arguments.length) args.push(arguments[position++]);
-      return func.apply(this, args);
+      return executeBound(func, bound, this, this, args);
     };
   };
 
@@ -1056,7 +1059,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // defined on an object belong to it.
   _.bindAll = function(obj) {
     var i, length = arguments.length, key;
-    if (length <= 1) throw Error('bindAll must be passed function names');
+    if (length <= 1) throw new Error('bindAll must be passed function names');
     for (i = 1; i < length; i++) {
       key = arguments[i];
       obj[key] = _.bind(obj[key], obj);
@@ -1068,9 +1071,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.memoize = function(func, hasher) {
     var memoize = function(key) {
       var cache = memoize.cache;
-      var address = hasher ? hasher.apply(this, arguments) : key;
+      var address = '' + (hasher ? hasher.apply(this, arguments) : key);
       if (!_.has(cache, address)) cache[address] = func.apply(this, arguments);
-      return cache[key];
+      return cache[address];
     };
     memoize.cache = {};
     return memoize;
@@ -1114,8 +1117,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       context = this;
       args = arguments;
       if (remaining <= 0 || remaining > wait) {
-        clearTimeout(timeout);
-        timeout = null;
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
         previous = now;
         result = func.apply(context, args);
         if (!timeout) context = args = null;
@@ -1136,7 +1141,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var later = function() {
       var last = _.now() - timestamp;
 
-      if (last < wait && last > 0) {
+      if (last < wait && last >= 0) {
         timeout = setTimeout(later, wait - last);
       } else {
         timeout = null;
@@ -1205,7 +1210,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       if (--times > 0) {
         memo = func.apply(this, arguments);
       }
-      else func = null;
+      if (times <= 1) {
+        func = null;
+      }
       return memo;
     };
   };
@@ -1217,6 +1224,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Object Functions
   // ----------------
 
+  // Keys in IE < 9 that won't be iterated by `for key in ...` and thus missed.
+  var hasEnumBug = !({toString: null}).propertyIsEnumerable('toString');
+  var nonEnumerableProps = ['constructor', 'valueOf', 'isPrototypeOf', 'toString',
+                      'propertyIsEnumerable', 'hasOwnProperty', 'toLocaleString'];
+
   // Retrieve the names of an object's properties.
   // Delegates to **ECMAScript 5**'s native `Object.keys`
   _.keys = function(obj) {
@@ -1224,6 +1236,15 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     if (nativeKeys) return nativeKeys(obj);
     var keys = [];
     for (var key in obj) if (_.has(obj, key)) keys.push(key);
+
+    // Ahem, IE < 9.
+    if (hasEnumBug) {
+      var nonEnumIdx = nonEnumerableProps.length;
+      while (nonEnumIdx--) {
+        var prop = nonEnumerableProps[nonEnumIdx];
+        if (_.has(obj, prop) && !_.contains(keys, prop)) keys.push(prop);
+      }
+    }
     return keys;
   };
 
@@ -1283,18 +1304,18 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Return a copy of the object only containing the whitelisted properties.
-  _.pick = function(obj, iterator, context) {
+  _.pick = function(obj, iteratee, context) {
     var result = {}, key;
     if (obj == null) return result;
-    if (_.isFunction(iterator)) {
-      iterator = createCallback(iterator, context);
+    if (_.isFunction(iteratee)) {
+      iteratee = optimizeCb(iteratee, context);
       for (key in obj) {
         var value = obj[key];
-        if (iterator(value, key, obj)) result[key] = value;
+        if (iteratee(value, key, obj)) result[key] = value;
       }
     } else {
-      var keys = concat.apply([], slice.call(arguments, 1));
-      obj = Object(obj);
+      var keys = flatten(arguments, false, false, 1);
+      obj = new Object(obj);
       for (var i = 0, length = keys.length; i < length; i++) {
         key = keys[i];
         if (key in obj) result[key] = obj[key];
@@ -1304,16 +1325,16 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
    // Return a copy of the object without the blacklisted properties.
-  _.omit = function(obj, iterator, context) {
-    if (_.isFunction(iterator)) {
-      iterator = _.negate(iterator);
+  _.omit = function(obj, iteratee, context) {
+    if (_.isFunction(iteratee)) {
+      iteratee = _.negate(iteratee);
     } else {
-      var keys = _.map(concat.apply([], slice.call(arguments, 1)), String);
-      iterator = function(value, key) {
+      var keys = _.map(flatten(arguments, false, false, 1), String);
+      iteratee = function(value, key) {
         return !_.contains(keys, key);
       };
     }
-    return _.pick(obj, iterator, context);
+    return _.pick(obj, iteratee, context);
   };
 
   // Fill in a given object with default properties.
@@ -1366,9 +1387,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       case '[object Number]':
         // `NaN`s are equivalent, but non-reflexive.
         // Object(NaN) is equivalent to NaN
-        if (a != +a) return b != +b;
+        if (+a !== +a) return +b !== +b;
         // An `egal` comparison is performed for other numeric values.
-        return a == 0 ? 1 / a == 1 / b : a == +b;
+        return +a === 0 ? 1 / +a === 1 / b : +a === +b;
       case '[object Date]':
       case '[object Boolean]':
         // Coerce dates and booleans to numeric primitive values. Dates are compared by their
@@ -1376,7 +1397,20 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         // of `NaN` are not equivalent.
         return +a === +b;
     }
-    if (typeof a != 'object' || typeof b != 'object') return false;
+
+    var areArrays = className === '[object Array]';
+    if (!areArrays) {
+      if (typeof a != 'object' || typeof b != 'object') return false;
+
+      // Objects with different constructors are not equivalent, but `Object`s or `Array`s
+      // from different frames are.
+      var aCtor = a.constructor, bCtor = b.constructor;
+      if (aCtor !== bCtor && !(_.isFunction(aCtor) && aCtor instanceof aCtor &&
+                               _.isFunction(bCtor) && bCtor instanceof bCtor)
+                          && ('constructor' in a && 'constructor' in b)) {
+        return false;
+      }
+    }
     // Assume equality for cyclic structures. The algorithm for detecting cyclic
     // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
     var length = aStack.length;
@@ -1385,24 +1419,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       // unique nested structures.
       if (aStack[length] === a) return bStack[length] === b;
     }
-    // Objects with different constructors are not equivalent, but `Object`s
-    // from different frames are.
-    var aCtor = a.constructor, bCtor = b.constructor;
-    if (
-      aCtor !== bCtor &&
-      // Handle Object.create(x) cases
-      'constructor' in a && 'constructor' in b &&
-      !(_.isFunction(aCtor) && aCtor instanceof aCtor &&
-        _.isFunction(bCtor) && bCtor instanceof bCtor)
-    ) {
-      return false;
-    }
+
     // Add the first object to the stack of traversed objects.
     aStack.push(a);
     bStack.push(b);
     var size, result;
     // Recursively compare objects and arrays.
-    if (className === '[object Array]') {
+    if (areArrays) {
       // Compare array lengths to determine if a deep comparison is necessary.
       size = a.length;
       result = size === b.length;
@@ -1417,7 +1440,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       var keys = _.keys(a), key;
       size = keys.length;
       // Ensure that both objects contain the same number of properties before comparing deep equality.
-      result = _.keys(b).length == size;
+      result = _.keys(b).length === size;
       if (result) {
         while (size--) {
           // Deep compare each member
@@ -1459,17 +1482,18 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Is a given variable an object?
   _.isObject = function(obj) {
-    return obj === Object(obj);
+    var type = typeof obj;
+    return type === 'function' || type === 'object' && !!obj;
   };
 
-  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp.
-  _.each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp'], function(name) {
+  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp, isError.
+  _.each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp', 'Error'], function(name) {
     _['is' + name] = function(obj) {
       return toString.call(obj) === '[object ' + name + ']';
     };
   });
 
-  // Define a fallback version of the method in browsers (ahem, IE), where
+  // Define a fallback version of the method in browsers (ahem, IE < 9), where
   // there isn't any inspectable "Arguments" type.
   if (!_.isArguments(arguments)) {
     _.isArguments = function(obj) {
@@ -1477,10 +1501,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   }
 
-  // Optimize `isFunction` if appropriate.
+  // Optimize `isFunction` if appropriate. Work around an IE 11 bug.
   if (typeof /./ !== 'function') {
     _.isFunction = function(obj) {
-      return typeof obj === 'function';
+      return typeof obj == 'function' || false;
     };
   }
 
@@ -1525,11 +1549,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return this;
   };
 
-  // Keep the identity function around for default iterators.
+  // Keep the identity function around for default iteratees.
   _.identity = function(value) {
     return value;
   };
 
+  // Predicate-generating functions. Often useful outside of Underscore.
   _.constant = function(value) {
     return function() {
       return value;
@@ -1540,25 +1565,29 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   _.property = function(key) {
     return function(obj) {
-      return obj[key];
+      return obj == null ? void 0 : obj[key];
     };
   };
 
   // Returns a predicate for checking whether an object has a given set of `key:value` pairs.
   _.matches = function(attrs) {
+    var pairs = _.pairs(attrs), length = pairs.length;
     return function(obj) {
-      if (obj == null) return _.isEmpty(attrs);
-      if (obj === attrs) return true;
-      for (var key in attrs) if (attrs[key] !== obj[key]) return false;
+      if (obj == null) return !length;
+      obj = new Object(obj);
+      for (var i = 0; i < length; i++) {
+        var pair = pairs[i], key = pair[0];
+        if (pair[1] !== obj[key] || !(key in obj)) return false;
+      }
       return true;
     };
   };
 
   // Run a function **n** times.
-  _.times = function(n, iterator, context) {
+  _.times = function(n, iteratee, context) {
     var accum = Array(Math.max(0, n));
-    iterator = createCallback(iterator, context, 1);
-    for (var i = 0; i < n; i++) accum[i] = iterator(i);
+    iteratee = optimizeCb(iteratee, context, 1);
+    for (var i = 0; i < n; i++) accum[i] = iteratee(i);
     return accum;
   };
 
@@ -1576,39 +1605,41 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return new Date().getTime();
   };
 
-  // List of HTML entities for escaping.
-  var entityMap = {
-    escape: {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#x27;'
-    }
+   // List of HTML entities for escaping.
+  var escapeMap = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '`': '&#x60;'
   };
-  entityMap.unescape = _.invert(entityMap.escape);
-
-  // Regexes containing the keys and values listed immediately above.
-  var entityRegexes = {
-    escape:   RegExp('[' + _.keys(entityMap.escape).join('') + ']', 'g'),
-    unescape: RegExp('(' + _.keys(entityMap.unescape).join('|') + ')', 'g')
-  };
+  var unescapeMap = _.invert(escapeMap);
 
   // Functions for escaping and unescaping strings to/from HTML interpolation.
-  _.each(['escape', 'unescape'], function(method) {
-    _[method] = function(string) {
-      if (string == null) return '';
-      return ('' + string).replace(entityRegexes[method], function(match) {
-        return entityMap[method][match];
-      });
+  var createEscaper = function(map) {
+    var escaper = function(match) {
+      return map[match];
     };
-  });
+    // Regexes for identifying a key that needs to be escaped
+    var source = '(?:' + _.keys(map).join('|') + ')';
+    var testRegexp = RegExp(source);
+    var replaceRegexp = RegExp(source, 'g');
+    return function(string) {
+      string = string == null ? '' : '' + string;
+      return testRegexp.test(string) ? string.replace(replaceRegexp, escaper) : string;
+    };
+  };
+  _.escape = createEscaper(escapeMap);
+  _.unescape = createEscaper(unescapeMap);
 
   // If the value of the named `property` is a function then invoke it with the
   // `object` as context; otherwise, return it.
-  _.result = function(object, property) {
-    if (object == null) return void 0;
-    var value = object[property];
+  _.result = function(object, property, fallback) {
+    var value = object == null ? void 0 : object[property];
+    if (value === void 0) {
+      return fallback;
+    }
     return _.isFunction(value) ? object[property]() : value;
   };
 
@@ -1653,7 +1684,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // JavaScript micro-templating, similar to John Resig's implementation.
   // Underscore templating handles arbitrary delimiters, preserves whitespace,
   // and correctly escapes quotes within interpolated code.
-  _.template = function(text, data, settings) {
+  // NB: `oldSettings` only exists for backwards compatibility.
+  _.template = function(text, settings, oldSettings) {
+    if (!settings && oldSettings) settings = oldSettings;
     settings = _.defaults({}, settings, _.templateSettings);
 
     // Combine delimiters into one regular expression via alternation.
@@ -1691,13 +1724,12 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       source + 'return __p;\n';
 
     try {
-      var render = Function(settings.variable || 'obj', '_', source);
+      var render = new Function(settings.variable || 'obj', '_', source);
     } catch (e) {
       e.source = source;
       throw e;
     }
 
-    if (data) return render(data, _);
     var template = function(data) {
       return render.call(this, data, _);
     };
@@ -1723,8 +1755,8 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // underscore functions. Wrapped objects may be chained.
 
   // Helper function to continue chaining intermediate results.
-  var result = function(obj) {
-    return this._chain ? _(obj).chain() : obj;
+  var result = function(instance, obj) {
+    return instance._chain ? _(obj).chain() : obj;
   };
 
   // Add your own custom functions to the Underscore object.
@@ -1734,7 +1766,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       _.prototype[name] = function() {
         var args = [this._wrapped];
         push.apply(args, arguments);
-        return result.call(this, func.apply(_, args));
+        return result(this, func.apply(_, args));
       };
     });
   };
@@ -1749,7 +1781,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       var obj = this._wrapped;
       method.apply(obj, arguments);
       if ((name === 'shift' || name === 'splice') && obj.length === 0) delete obj[0];
-      return result.call(this, obj);
+      return result(this, obj);
     };
   });
 
@@ -1757,7 +1789,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.each(['concat', 'join', 'slice'], function(name) {
     var method = ArrayProto[name];
     _.prototype[name] = function() {
-      return result.call(this, method.apply(this._wrapped, arguments));
+      return result(this, method.apply(this._wrapped, arguments));
     };
   });
 
@@ -3563,10 +3595,10 @@ module.exports = (function(){
 })();
 });
 require.register("noflo-noflo/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.6","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
+module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.9","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
 });
 require.register("noflo-noflo/src/lib/Graph.js", function(exports, require, module){
-var EventEmitter, Graph, clone, platform,
+var EventEmitter, Graph, clone, mergeResolveTheirsNaive, platform, resetGraph,
   __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
@@ -4311,6 +4343,24 @@ Graph = (function(_super) {
     return initializer;
   };
 
+  Graph.prototype.addGraphInitial = function(data, node, metadata) {
+    var inport;
+    inport = this.inports[node];
+    if (!inport) {
+      return;
+    }
+    return this.addInitial(data, inport.process, inport.port, metadata);
+  };
+
+  Graph.prototype.addGraphInitialIndex = function(data, node, index, metadata) {
+    var inport;
+    inport = this.inports[node];
+    if (!inport) {
+      return;
+    }
+    return this.addInitialIndex(data, inport.process, inport.port, index, metadata);
+  };
+
   Graph.prototype.removeInitial = function(node, port) {
     var edge, index, toKeep, toRemove, _i, _j, _len, _len1, _ref;
     this.checkTransactionStart();
@@ -4331,6 +4381,15 @@ Graph = (function(_super) {
       this.emit('removeInitial', edge);
     }
     return this.checkTransactionEnd();
+  };
+
+  Graph.prototype.removeGraphInitial = function(node) {
+    var inport;
+    inport = this.inports[node];
+    if (!inport) {
+      return;
+    }
+    return this.removeInitial(inport.process, inport.port);
   };
 
   Graph.prototype.toDOT = function() {
@@ -4502,6 +4561,9 @@ exports.loadJSON = function(definition, success, metadata) {
   if (metadata == null) {
     metadata = {};
   }
+  if (typeof definition === 'string') {
+    definition = JSON.parse(definition);
+  }
   if (!definition.properties) {
     definition.properties = {};
   }
@@ -4538,8 +4600,9 @@ exports.loadJSON = function(definition, success, metadata) {
     if (conn.data !== void 0) {
       if (typeof conn.tgt.index === 'number') {
         graph.addInitialIndex(conn.data, conn.tgt.process, conn.tgt.port.toLowerCase(), conn.tgt.index, metadata);
+      } else {
+        graph.addInitial(conn.data, conn.tgt.process, conn.tgt.port.toLowerCase(), metadata);
       }
-      graph.addInitial(conn.data, conn.tgt.process, conn.tgt.port.toLowerCase(), metadata);
       continue;
     }
     if (typeof conn.src.index === 'number' || typeof conn.tgt.index === 'number') {
@@ -4656,6 +4719,105 @@ exports.loadFile = function(file, success, metadata) {
   });
 };
 
+resetGraph = function(graph) {
+  var edge, exp, group, iip, node, port, v, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6, _results;
+  _ref = (clone(graph.groups)).reverse();
+  for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+    group = _ref[_i];
+    if (group != null) {
+      graph.removeGroup(group.name);
+    }
+  }
+  _ref1 = clone(graph.outports);
+  for (port in _ref1) {
+    v = _ref1[port];
+    graph.removeOutport(port);
+  }
+  _ref2 = clone(graph.inports);
+  for (port in _ref2) {
+    v = _ref2[port];
+    graph.removeInport(port);
+  }
+  _ref3 = clone(graph.exports.reverse());
+  for (_j = 0, _len1 = _ref3.length; _j < _len1; _j++) {
+    exp = _ref3[_j];
+    graph.removeExports(exp["public"]);
+  }
+  graph.setProperties({});
+  _ref4 = (clone(graph.initializers)).reverse();
+  for (_k = 0, _len2 = _ref4.length; _k < _len2; _k++) {
+    iip = _ref4[_k];
+    graph.removeInitial(iip.to.node, iip.to.port);
+  }
+  _ref5 = (clone(graph.edges)).reverse();
+  for (_l = 0, _len3 = _ref5.length; _l < _len3; _l++) {
+    edge = _ref5[_l];
+    graph.removeEdge(edge.from.node, edge.from.port, edge.to.node, edge.to.port);
+  }
+  _ref6 = (clone(graph.nodes)).reverse();
+  _results = [];
+  for (_m = 0, _len4 = _ref6.length; _m < _len4; _m++) {
+    node = _ref6[_m];
+    _results.push(graph.removeNode(node.id));
+  }
+  return _results;
+};
+
+mergeResolveTheirsNaive = function(base, to) {
+  var edge, exp, group, iip, node, priv, pub, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6, _results;
+  resetGraph(base);
+  _ref = to.nodes;
+  for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+    node = _ref[_i];
+    base.addNode(node.id, node.component, node.metadata);
+  }
+  _ref1 = to.edges;
+  for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
+    edge = _ref1[_j];
+    base.addEdge(edge.from.node, edge.from.port, edge.to.node, edge.to.port, edge.metadata);
+  }
+  _ref2 = to.initializers;
+  for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
+    iip = _ref2[_k];
+    base.addInitial(iip.from.data, iip.to.node, iip.to.port, iip.metadata);
+  }
+  _ref3 = to.exports;
+  for (_l = 0, _len3 = _ref3.length; _l < _len3; _l++) {
+    exp = _ref3[_l];
+    base.addExport(exp["public"], exp.node, exp.port, exp.metadata);
+  }
+  base.setProperties(to.properties);
+  _ref4 = to.inports;
+  for (pub in _ref4) {
+    priv = _ref4[pub];
+    base.addInport(pub, priv.process, priv.port, priv.metadata);
+  }
+  _ref5 = to.outports;
+  for (pub in _ref5) {
+    priv = _ref5[pub];
+    base.addOutport(pub, priv.process, priv.port, priv.metadata);
+  }
+  _ref6 = to.groups;
+  _results = [];
+  for (_m = 0, _len4 = _ref6.length; _m < _len4; _m++) {
+    group = _ref6[_m];
+    _results.push(base.addGroup(group.name, group.nodes, group.metadata));
+  }
+  return _results;
+};
+
+exports.equivalent = function(a, b, options) {
+  var A, B;
+  if (options == null) {
+    options = {};
+  }
+  A = JSON.stringify(a);
+  B = JSON.stringify(b);
+  return A === B;
+};
+
+exports.mergeResolveTheirs = mergeResolveTheirsNaive;
+
 });
 require.register("noflo-noflo/src/lib/InternalSocket.js", function(exports, require, module){
 var EventEmitter, InternalSocket,
@@ -4667,9 +4829,29 @@ EventEmitter = require('events').EventEmitter;
 InternalSocket = (function(_super) {
   __extends(InternalSocket, _super);
 
+  InternalSocket.prototype.regularEmitEvent = function(event, data) {
+    return this.emit(event, data);
+  };
+
+  InternalSocket.prototype.debugEmitEvent = function(event, data) {
+    var error;
+    try {
+      return this.emit(event, data);
+    } catch (_error) {
+      error = _error;
+      return this.emit('error', {
+        id: this.to.process.id,
+        error: error
+      });
+    }
+  };
+
   function InternalSocket() {
     this.connected = false;
     this.groups = [];
+    this.dataDelegate = null;
+    this.debug = false;
+    this.emitEvent = this.regularEmitEvent;
   }
 
   InternalSocket.prototype.connect = function() {
@@ -4677,7 +4859,7 @@ InternalSocket = (function(_super) {
       return;
     }
     this.connected = true;
-    return this.emit('connect', this);
+    return this.emitEvent('connect', this);
   };
 
   InternalSocket.prototype.disconnect = function() {
@@ -4685,7 +4867,7 @@ InternalSocket = (function(_super) {
       return;
     }
     this.connected = false;
-    return this.emit('disconnect', this);
+    return this.emitEvent('disconnect', this);
   };
 
   InternalSocket.prototype.isConnected = function() {
@@ -4696,19 +4878,34 @@ InternalSocket = (function(_super) {
     if (!this.connected) {
       this.connect();
     }
-    return this.emit('data', data);
+    if (data === void 0 && typeof this.dataDelegate === 'function') {
+      data = this.dataDelegate();
+    }
+    return this.emitEvent('data', data);
   };
 
   InternalSocket.prototype.beginGroup = function(group) {
     this.groups.push(group);
-    return this.emit('begingroup', group);
+    return this.emitEvent('begingroup', group);
   };
 
   InternalSocket.prototype.endGroup = function() {
     if (!this.groups.length) {
       return;
     }
-    return this.emit('endgroup', this.groups.pop());
+    return this.emitEvent('endgroup', this.groups.pop());
+  };
+
+  InternalSocket.prototype.setDataDelegate = function(delegate) {
+    if (typeof delegate !== 'function') {
+      throw Error('A data delegate must be a function.');
+    }
+    return this.dataDelegate = delegate;
+  };
+
+  InternalSocket.prototype.setDebug = function(active) {
+    this.debug = active;
+    return this.emitEvent = this.debug ? this.debugEmitEvent : this.regularEmitEvent;
   };
 
   InternalSocket.prototype.getId = function() {
@@ -4898,6 +5095,9 @@ BasePort = (function(_super) {
     connected = false;
     this.sockets.forEach((function(_this) {
       return function(socket) {
+        if (!socket) {
+          return;
+        }
         if (socket.isConnected()) {
           return connected = true;
         }
@@ -4947,13 +5147,19 @@ InPort = (function(_super) {
       this.process = process;
     }
     InPort.__super__.constructor.call(this, options);
-    this.sendDefault();
     this.prepareBuffer();
   }
 
   InPort.prototype.attachSocket = function(socket, localId) {
     if (localId == null) {
       localId = null;
+    }
+    if (this.hasDefault()) {
+      socket.setDataDelegate((function(_this) {
+        return function() {
+          return _this.options["default"];
+        };
+      })(this));
     }
     socket.on('connect', (function(_this) {
       return function() {
@@ -5016,22 +5222,8 @@ InPort = (function(_super) {
     return this.emit(event, payload);
   };
 
-  InPort.prototype.sendDefault = function() {
-    if (this.options["default"] === void 0) {
-      return;
-    }
-    return setTimeout((function(_this) {
-      return function() {
-        var idx, socket, _i, _len, _ref, _results;
-        _ref = _this.sockets;
-        _results = [];
-        for (idx = _i = 0, _len = _ref.length; _i < _len; idx = ++_i) {
-          socket = _ref[idx];
-          _results.push(_this.handleSocketEvent('data', _this.options["default"], idx));
-        }
-        return _results;
-      };
-    })(this), 0);
+  InPort.prototype.hasDefault = function() {
+    return this.options["default"] !== void 0;
   };
 
   InPort.prototype.prepareBuffer = function() {
@@ -5264,6 +5456,9 @@ Ports = (function(_super) {
     if (name === 'add' || name === 'remove') {
       throw new Error('Add and remove are restricted port names');
     }
+    if (!name.match(/^[a-z0-9_\.\/]+$/)) {
+      throw new Error("Port names can only contain lowercase alphanumeric characters and underscores. '" + name + "' not allowed");
+    }
     if (this.ports[name]) {
       this.remove(name);
     }
@@ -5273,7 +5468,8 @@ Ports = (function(_super) {
       this.ports[name] = new this.model(options, process);
     }
     this[name] = this.ports[name];
-    return this.emit('add', name);
+    this.emit('add', name);
+    return this;
   };
 
   Ports.prototype.remove = function(name) {
@@ -5282,7 +5478,8 @@ Ports = (function(_super) {
     }
     delete this.ports[name];
     delete this[name];
-    return this.emit('remove', name);
+    this.emit('remove', name);
+    return this;
   };
 
   return Ports;
@@ -5825,6 +6022,8 @@ Component = (function(_super) {
 
   Component.prototype.icon = null;
 
+  Component.prototype.started = false;
+
   function Component(options) {
     this.error = __bind(this.error, this);
     if (!options) {
@@ -5893,7 +6092,18 @@ Component = (function(_super) {
     throw e;
   };
 
-  Component.prototype.shutdown = function() {};
+  Component.prototype.shutdown = function() {
+    return this.started = false;
+  };
+
+  Component.prototype.start = function() {
+    this.started = true;
+    return this.started;
+  };
+
+  Component.prototype.isStarted = function() {
+    return this.started;
+  };
 
   return Component;
 
@@ -6074,6 +6284,11 @@ AsyncComponent = (function(_super) {
     }
   };
 
+  AsyncComponent.prototype.shutdown = function() {
+    this.q = [];
+    return this.errorGroups = [];
+  };
+
   return AsyncComponent;
 
 })(component.Component);
@@ -6251,12 +6466,12 @@ ComponentLoader = (function(_super) {
     })(this), 1);
   };
 
-  ComponentLoader.prototype.load = function(name, callback, delayed, metadata) {
-    var component, componentName, implementation, instance;
+  ComponentLoader.prototype.load = function(name, callback, metadata) {
+    var component, componentName;
     if (!this.ready) {
       this.listComponents((function(_this) {
         return function() {
-          return _this.load(name, callback, delayed, metadata);
+          return _this.load(name, callback, metadata);
         };
       })(this));
       return;
@@ -6270,7 +6485,7 @@ ComponentLoader = (function(_super) {
         }
       }
       if (!component) {
-        throw new Error("Component " + name + " not available with base " + this.baseDir);
+        callback(new Error("Component " + name + " not available with base " + this.baseDir));
         return;
       }
     }
@@ -6278,43 +6493,56 @@ ComponentLoader = (function(_super) {
       if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
         process.nextTick((function(_this) {
           return function() {
-            return _this.loadGraph(name, component, callback, delayed, metadata);
+            return _this.loadGraph(name, component, callback, metadata);
           };
         })(this));
       } else {
         setTimeout((function(_this) {
           return function() {
-            return _this.loadGraph(name, component, callback, delayed, metadata);
+            return _this.loadGraph(name, component, callback, metadata);
           };
         })(this), 0);
       }
       return;
     }
-    if (typeof component === 'function') {
-      implementation = component;
-      if (component.getComponent && typeof component.getComponent === 'function') {
-        instance = component.getComponent(metadata);
-      } else {
-        instance = component(metadata);
-      }
-    } else if (typeof component === 'object' && typeof component.getComponent === 'function') {
-      instance = component.getComponent(metadata);
-    } else {
-      implementation = require(component);
-      if (implementation.getComponent && typeof implementation.getComponent === 'function') {
-        instance = implementation.getComponent(metadata);
-      } else {
-        if (typeof implementation !== 'function') {
-          throw new Error("Component " + name + " is not loadable");
+    return this.createComponent(name, component, metadata, (function(_this) {
+      return function(err, instance) {
+        if (err) {
+          return callback(err);
         }
-        instance = implementation(metadata);
+        if (!instance) {
+          callback(new Error("Component " + name + " could not be loaded."));
+          return;
+        }
+        if (name === 'Graph') {
+          instance.baseDir = _this.baseDir;
+        }
+        _this.setIcon(name, instance);
+        return callback(null, instance);
+      };
+    })(this));
+  };
+
+  ComponentLoader.prototype.createComponent = function(name, component, metadata, callback) {
+    var e, implementation, instance;
+    implementation = component;
+    if (typeof implementation === 'string') {
+      try {
+        implementation = require(implementation);
+      } catch (_error) {
+        e = _error;
+        return callback(e);
       }
     }
-    if (name === 'Graph') {
-      instance.baseDir = this.baseDir;
+    if (typeof implementation.getComponent === 'function') {
+      instance = implementation.getComponent(metadata);
+    } else if (typeof implementation === 'function') {
+      instance = implementation(metadata);
+    } else {
+      callback(new Error("Invalid type " + (typeof implementation) + " for component " + name + "."));
+      return;
     }
-    this.setIcon(name, instance);
-    return callback(instance);
+    return callback(null, instance);
   };
 
   ComponentLoader.prototype.isGraph = function(cPath) {
@@ -6327,24 +6555,19 @@ ComponentLoader = (function(_super) {
     return cPath.indexOf('.fbp') !== -1 || cPath.indexOf('.json') !== -1;
   };
 
-  ComponentLoader.prototype.loadGraph = function(name, component, callback, delayed, metadata) {
-    var delaySocket, graph, graphImplementation, graphSocket;
+  ComponentLoader.prototype.loadGraph = function(name, component, callback, metadata) {
+    var graph, graphImplementation, graphSocket;
     graphImplementation = require(this.components['Graph']);
     graphSocket = internalSocket.createSocket();
     graph = graphImplementation.getComponent(metadata);
     graph.loader = this;
     graph.baseDir = this.baseDir;
-    if (delayed) {
-      delaySocket = internalSocket.createSocket();
-      graph.inPorts.start.attach(delaySocket);
-    }
     graph.inPorts.graph.attach(graphSocket);
     graphSocket.send(component);
     graphSocket.disconnect();
     graph.inPorts.remove('graph');
-    graph.inPorts.remove('start');
     this.setIcon(name, graph);
-    return callback(graph);
+    return callback(null, graph);
   };
 
   ComponentLoader.prototype.setIcon = function(name, instance) {
@@ -6463,14 +6686,28 @@ ComponentLoader = (function(_super) {
     if (typeof component !== 'string') {
       return callback(new Error("Can't provide source for " + name + ". Not a file"));
     }
-    path = window.require.resolve(component);
-    if (!path) {
-      return callback(new Error("Component " + name + " is not resolvable to a path"));
-    }
     nameParts = name.split('/');
     if (nameParts.length === 1) {
       nameParts[1] = nameParts[0];
       nameParts[0] = '';
+    }
+    if (this.isGraph(component)) {
+      nofloGraph.loadFile(component, function(graph) {
+        if (!graph) {
+          return callback(new Error('Unable to load graph'));
+        }
+        return callback(null, {
+          name: nameParts[1],
+          library: nameParts[0],
+          code: JSON.stringify(graph.toJSON()),
+          language: 'json'
+        });
+      });
+      return;
+    }
+    path = window.require.resolve(component);
+    if (!path) {
+      return callback(new Error("Component " + name + " is not resolvable to a path"));
     }
     return callback(null, {
       name: nameParts[1],
@@ -6614,6 +6851,8 @@ Network = (function(_super) {
 
   Network.prototype.initials = [];
 
+  Network.prototype.defaults = [];
+
   Network.prototype.graph = null;
 
   Network.prototype.startupDate = null;
@@ -6624,7 +6863,10 @@ Network = (function(_super) {
     this.processes = {};
     this.connections = [];
     this.initials = [];
+    this.defaults = [];
     this.graph = graph;
+    this.started = false;
+    this.debug = false;
     if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
       this.baseDir = graph.baseDir || process.cwd();
     } else {
@@ -6674,14 +6916,14 @@ Network = (function(_super) {
   };
 
   Network.prototype.load = function(component, metadata, callback) {
-    return this.loader.load(component, callback, false, metadata);
+    return this.loader.load(component, callback, metadata);
   };
 
   Network.prototype.addNode = function(node, callback) {
     var process;
     if (this.processes[node.id]) {
       if (callback) {
-        callback(this.processes[node.id]);
+        callback(null, this.processes[node.id]);
       }
       return;
     }
@@ -6691,13 +6933,16 @@ Network = (function(_super) {
     if (!node.component) {
       this.processes[process.id] = process;
       if (callback) {
-        callback(process);
+        callback(null, process);
       }
       return;
     }
     return this.load(node.component, node.metadata, (function(_this) {
-      return function(instance) {
+      return function(err, instance) {
         var name, port, _ref, _ref1;
+        if (err) {
+          return callback(err);
+        }
         instance.nodeId = node.id;
         process.component = instance;
         _ref = process.component.inPorts;
@@ -6726,7 +6971,7 @@ Network = (function(_super) {
         _this.subscribeNode(process);
         _this.processes[process.id] = process;
         if (callback) {
-          return callback(process);
+          return callback(null, process);
         }
       };
     })(this));
@@ -6734,12 +6979,12 @@ Network = (function(_super) {
 
   Network.prototype.removeNode = function(node, callback) {
     if (!this.processes[node.id]) {
-      return;
+      return callback(new Error("Node " + node.id + " not found"));
     }
     this.processes[node.id].component.shutdown();
     delete this.processes[node.id];
     if (callback) {
-      return callback();
+      return callback(null);
     }
   };
 
@@ -6747,7 +6992,7 @@ Network = (function(_super) {
     var name, port, process, _ref, _ref1;
     process = this.getNode(oldId);
     if (!process) {
-      return;
+      return callback(new Error("Process " + oldId + " not found"));
     }
     process.id = newId;
     _ref = process.component.inPorts;
@@ -6763,7 +7008,7 @@ Network = (function(_super) {
     this.processes[newId] = process;
     delete this.processes[oldId];
     if (callback) {
-      return callback();
+      return callback(null);
     }
   };
 
@@ -6772,7 +7017,7 @@ Network = (function(_super) {
   };
 
   Network.prototype.connect = function(done) {
-    var callStack, edges, initializers, nodes, serialize, subscribeGraph;
+    var callStack, edges, initializers, nodes, serialize, setDefaults, subscribeGraph;
     if (done == null) {
       done = function() {};
     }
@@ -6799,7 +7044,10 @@ Network = (function(_super) {
         return done();
       };
     })(this);
-    initializers = _.reduceRight(this.graph.initializers, serialize, subscribeGraph);
+    setDefaults = _.reduceRight(this.graph.nodes, serialize, subscribeGraph);
+    initializers = _.reduceRight(this.graph.initializers, serialize, function() {
+      return setDefaults("Defaults");
+    });
     edges = _.reduceRight(this.graph.edges, serialize, function() {
       return initializers("Initial");
     });
@@ -6976,8 +7224,11 @@ Network = (function(_super) {
     node.component.network.on('endgroup', function(data) {
       return emitSub('endgroup', data);
     });
-    return node.component.network.on('disconnect', function(data) {
+    node.component.network.on('disconnect', function(data) {
       return emitSub('disconnect', data);
+    });
+    return node.component.network.on('process-error', function(data) {
+      return emitSub('process-error', data);
     });
   };
 
@@ -7018,13 +7269,18 @@ Network = (function(_super) {
         });
       };
     })(this));
-    return socket.on('disconnect', (function(_this) {
+    socket.on('disconnect', (function(_this) {
       return function() {
         _this.decreaseConnections();
         return _this.emit('disconnect', {
           id: socket.getId(),
           socket: socket
         });
+      };
+    })(this));
+    return socket.on('error', (function(_this) {
+      return function(event) {
+        return _this.emit('process-error', event);
       };
     })(this));
   };
@@ -7076,9 +7332,9 @@ Network = (function(_super) {
       })(this));
       return;
     }
+    this.subscribeSocket(socket);
     this.connectPort(socket, to, edge.to.port, edge.to.index, true);
     this.connectPort(socket, from, edge.from.port, edge.from.index, false);
-    this.subscribeSocket(socket);
     this.connections.push(socket);
     if (callback) {
       return callback();
@@ -7113,6 +7369,36 @@ Network = (function(_super) {
     return _results;
   };
 
+  Network.prototype.addDefaults = function(node, callback) {
+    var key, port, process, socket, _ref;
+    process = this.processes[node.id];
+    if (!process.component.isReady()) {
+      if (process.component.setMaxListeners) {
+        process.component.setMaxListeners(0);
+      }
+      process.component.once("ready", (function(_this) {
+        return function() {
+          return _this.addDefaults(process, callback);
+        };
+      })(this));
+      return;
+    }
+    _ref = process.component.inPorts.ports;
+    for (key in _ref) {
+      port = _ref[key];
+      if (typeof port.hasDefault === 'function' && port.hasDefault() && !port.isAttached()) {
+        socket = internalSocket.createSocket();
+        this.subscribeSocket(socket);
+        this.connectPort(socket, process, key, void 0, true);
+        this.connections.push(socket);
+        this.defaults.push(socket);
+      }
+    }
+    if (callback) {
+      return callback();
+    }
+  };
+
   Network.prototype.addInitial = function(initializer, callback) {
     var socket, to;
     socket = internalSocket.createSocket();
@@ -7122,7 +7408,9 @@ Network = (function(_super) {
       throw new Error("No process defined for inbound node " + initializer.to.node);
     }
     if (!(to.component.isReady() || to.component.inPorts[initializer.to.port])) {
-      to.component.setMaxListeners(0);
+      if (to.component.setMaxListeners) {
+        to.component.setMaxListeners(0);
+      }
       to.component.once("ready", (function(_this) {
         return function() {
           return _this.addInitial(initializer, callback);
@@ -7186,12 +7474,46 @@ Network = (function(_super) {
     }
   };
 
+  Network.prototype.isStarted = function() {
+    return this.started;
+  };
+
+  Network.prototype.startComponents = function() {
+    var id, process, _ref, _results;
+    _ref = this.processes;
+    _results = [];
+    for (id in _ref) {
+      process = _ref[id];
+      _results.push(process.component.start());
+    }
+    return _results;
+  };
+
+  Network.prototype.sendDefaults = function() {
+    var socket, _i, _len, _ref, _results;
+    _ref = this.defaults;
+    _results = [];
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      socket = _ref[_i];
+      if (socket.to.process.component.inPorts[socket.to.port].sockets.length !== 1) {
+        continue;
+      }
+      socket.connect();
+      socket.send();
+      _results.push(socket.disconnect());
+    }
+    return _results;
+  };
+
   Network.prototype.start = function() {
-    return this.sendInitials();
+    this.started = true;
+    this.startComponents();
+    this.sendInitials();
+    return this.sendDefaults();
   };
 
   Network.prototype.stop = function() {
-    var connection, id, process, _i, _len, _ref, _ref1, _results;
+    var connection, id, process, _i, _len, _ref, _ref1;
     _ref = this.connections;
     for (_i = 0, _len = _ref.length; _i < _len; _i++) {
       connection = _ref[_i];
@@ -7201,10 +7523,38 @@ Network = (function(_super) {
       connection.disconnect();
     }
     _ref1 = this.processes;
-    _results = [];
     for (id in _ref1) {
       process = _ref1[id];
-      _results.push(process.component.shutdown());
+      process.component.shutdown();
+    }
+    return this.started = false;
+  };
+
+  Network.prototype.getDebug = function() {
+    return this.debug;
+  };
+
+  Network.prototype.setDebug = function(active) {
+    var instance, process, processId, socket, _i, _len, _ref, _ref1, _results;
+    if (active === this.debug) {
+      return;
+    }
+    this.debug = active;
+    _ref = this.connections;
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      socket = _ref[_i];
+      socket.setDebug(active);
+    }
+    _ref1 = this.processes;
+    _results = [];
+    for (processId in _ref1) {
+      process = _ref1[processId];
+      instance = process.component;
+      if (instance.isSubgraph()) {
+        _results.push(instance.network.setDebug(active));
+      } else {
+        _results.push(void 0);
+      }
     }
     return _results;
   };
@@ -7897,12 +8247,23 @@ exports.guessLanguageFromFilename = guessLanguageFromFilename;
 
 });
 require.register("noflo-noflo/src/lib/Helpers.js", function(exports, require, module){
-var StreamReceiver, StreamSender,
+var InternalSocket, StreamReceiver, StreamSender, isArray, _,
   __hasProp = {}.hasOwnProperty;
+
+_ = require('underscore');
 
 StreamSender = require('./Streams').StreamSender;
 
 StreamReceiver = require('./Streams').StreamReceiver;
+
+InternalSocket = require('./InternalSocket');
+
+isArray = function(obj) {
+  if (Array.isArray) {
+    return Array.isArray(obj);
+  }
+  return Object.prototype.toString.call(arg) === '[object Array]';
+};
 
 exports.MapComponent = function(component, func, config) {
   var groups, inPort, outPort;
@@ -7938,20 +8299,23 @@ exports.MapComponent = function(component, func, config) {
 };
 
 exports.WirePattern = function(component, config, proc) {
-  var collectGroups, completeParams, groupedData, groupedDataGroups, inPorts, name, outPorts, port, processQueue, q, requiredParams, resumeTaskQ, taskQ, _fn, _fn1, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1;
+  var baseShutdown, closeGroupOnOuts, collectGroups, disconnectOuts, gc, inPorts, name, outPorts, port, processQueue, resumeTaskQ, sendGroupToOuts, _fn, _fn1, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1;
   inPorts = 'in' in config ? config["in"] : 'in';
-  if (!(inPorts instanceof Array)) {
+  if (!isArray(inPorts)) {
     inPorts = [inPorts];
   }
   outPorts = 'out' in config ? config.out : 'out';
-  if (!(outPorts instanceof Array)) {
+  if (!isArray(outPorts)) {
     outPorts = [outPorts];
+  }
+  if (!('error' in config)) {
+    config.error = 'error';
   }
   if (!('async' in config)) {
     config.async = false;
   }
   if (!('ordered' in config)) {
-    config.ordered = false;
+    config.ordered = true;
   }
   if (!('group' in config)) {
     config.group = false;
@@ -7983,6 +8347,24 @@ exports.WirePattern = function(component, config, proc) {
   if (typeof config.params === 'string') {
     config.params = [config.params];
   }
+  if (!('name' in config)) {
+    config.name = '';
+  }
+  if (!('dropInput' in config)) {
+    config.dropInput = false;
+  }
+  if (!('arrayPolicy' in config)) {
+    config.arrayPolicy = {
+      "in": 'any',
+      params: 'all'
+    };
+  }
+  if (!('gcFrequency' in config)) {
+    config.gcFrequency = 100;
+  }
+  if (!('gcTimeout' in config)) {
+    config.gcTimeout = 300;
+  }
   collectGroups = config.forwardGroups;
   if (typeof collectGroups === 'boolean' && !config.group) {
     collectGroups = inPorts;
@@ -7998,7 +8380,6 @@ exports.WirePattern = function(component, config, proc) {
     if (!component.inPorts[name]) {
       throw new Error("no inPort named '" + name + "'");
     }
-    component.inPorts[name].options.required = true;
   }
   for (_j = 0, _len1 = outPorts.length; _j < _len1; _j++) {
     name = outPorts[_j];
@@ -8006,31 +8387,65 @@ exports.WirePattern = function(component, config, proc) {
       throw new Error("no outPort named '" + name + "'");
     }
   }
-  groupedData = {};
-  groupedDataGroups = {};
-  q = [];
-  processQueue = function() {
-    var flushed, key, stream, streams;
-    while (q.length > 0) {
-      streams = q[0];
-      flushed = false;
-      if (outPorts.length === 1) {
-        if (streams.resolved) {
-          flushed = streams.flush();
-          if (flushed) {
-            q.shift();
-          }
-        }
+  component.groupedData = {};
+  component.groupedGroups = {};
+  component.groupedDisconnects = {};
+  disconnectOuts = function() {
+    var p, _k, _len2, _results;
+    _results = [];
+    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
+      p = outPorts[_k];
+      if (component.outPorts[p].isConnected()) {
+        _results.push(component.outPorts[p].disconnect());
       } else {
+        _results.push(void 0);
+      }
+    }
+    return _results;
+  };
+  sendGroupToOuts = function(grp) {
+    var p, _k, _len2, _results;
+    _results = [];
+    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
+      p = outPorts[_k];
+      _results.push(component.outPorts[p].beginGroup(grp));
+    }
+    return _results;
+  };
+  closeGroupOnOuts = function(grp) {
+    var p, _k, _len2, _results;
+    _results = [];
+    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
+      p = outPorts[_k];
+      _results.push(component.outPorts[p].endGroup(grp));
+    }
+    return _results;
+  };
+  component.outputQ = [];
+  processQueue = function() {
+    var flushed, key, stream, streams, tmp;
+    while (component.outputQ.length > 0) {
+      streams = component.outputQ[0];
+      flushed = false;
+      if (streams === null) {
+        disconnectOuts();
+        flushed = true;
+      } else {
+        if (outPorts.length === 1) {
+          tmp = {};
+          tmp[outPorts[0]] = streams;
+          streams = tmp;
+        }
         for (key in streams) {
           stream = streams[key];
           if (stream.resolved) {
-            flushed = stream.flush();
-            if (flushed) {
-              q.shift();
-            }
+            stream.flush();
+            flushed = true;
           }
         }
+      }
+      if (flushed) {
+        component.outputQ.shift();
       }
       if (!flushed) {
         return;
@@ -8043,7 +8458,7 @@ exports.WirePattern = function(component, config, proc) {
     }
     component.beforeProcess = function(outs) {
       if (config.ordered) {
-        q.push(outs);
+        component.outputQ.push(outs);
       }
       component.load++;
       if ('load' in component.outPorts && component.outPorts.load.isAttached()) {
@@ -8060,15 +8475,35 @@ exports.WirePattern = function(component, config, proc) {
       }
     };
   }
-  taskQ = [];
+  component.taskQ = [];
   component.params = {};
-  requiredParams = [];
-  completeParams = [];
+  component.requiredParams = [];
+  component.completeParams = [];
+  component.receivedParams = [];
+  component.defaultedParams = [];
+  component.defaultsSent = false;
+  component.sendDefaults = function() {
+    var param, tempSocket, _k, _len2, _ref;
+    if (component.defaultedParams.length > 0) {
+      _ref = component.defaultedParams;
+      for (_k = 0, _len2 = _ref.length; _k < _len2; _k++) {
+        param = _ref[_k];
+        if (component.receivedParams.indexOf(param) === -1) {
+          tempSocket = InternalSocket.createSocket();
+          component.inPorts[param].attach(tempSocket);
+          tempSocket.send();
+          tempSocket.disconnect();
+          component.inPorts[param].detach(tempSocket);
+        }
+      }
+    }
+    return component.defaultsSent = true;
+  };
   resumeTaskQ = function() {
     var task, temp, _results;
-    if (completeParams.length === requiredParams.length && taskQ.length > 0) {
-      temp = taskQ.slice(0);
-      taskQ = [];
+    if (component.completeParams.length === component.requiredParams.length && component.taskQ.length > 0) {
+      temp = component.taskQ.slice(0);
+      component.taskQ = [];
       _results = [];
       while (temp.length > 0) {
         task = temp.shift();
@@ -8084,21 +8519,35 @@ exports.WirePattern = function(component, config, proc) {
       throw new Error("no inPort named '" + port + "'");
     }
     if (component.inPorts[port].isRequired()) {
-      requiredParams.push(port);
+      component.requiredParams.push(port);
+    }
+    if (component.inPorts[port].hasDefault()) {
+      component.defaultedParams.push(port);
     }
   }
   _ref1 = config.params;
   _fn = function(port) {
     var inPort;
     inPort = component.inPorts[port];
-    return inPort.process = function(event, payload) {
+    return inPort.process = function(event, payload, index) {
       if (event !== 'data') {
         return;
       }
-      component.params[port] = payload;
-      if (completeParams.indexOf(port) === -1 && requiredParams.indexOf(port) > -1) {
-        completeParams.push(port);
+      if (inPort.isAddressable()) {
+        if (!(port in component.params)) {
+          component.params[port] = {};
+        }
+        component.params[port][index] = payload;
+        if (config.arrayPolicy.params === 'all' && Object.keys(component.params[port]).length < inPort.listAttached().length) {
+          return;
+        }
+      } else {
+        component.params[port] = payload;
       }
+      if (component.completeParams.indexOf(port) === -1 && component.requiredParams.indexOf(port) > -1) {
+        component.completeParams.push(port);
+      }
+      component.receivedParams.push(port);
       return resumeTaskQ();
     };
   };
@@ -8106,170 +8555,321 @@ exports.WirePattern = function(component, config, proc) {
     port = _ref1[_l];
     _fn(port);
   }
+  component.disconnectData = {};
+  component.disconnectQ = [];
+  component.groupBuffers = {};
+  component.keyBuffers = {};
+  component.gcTimestamps = {};
+  component.dropRequest = function(key) {
+    if (key in component.disconnectData) {
+      delete component.disconnectData[key];
+    }
+    if (key in component.groupedData) {
+      delete component.groupedData[key];
+    }
+    if (key in component.groupedGroups) {
+      return delete component.groupedGroups[key];
+    }
+  };
+  component.gcCounter = 0;
+  gc = function() {
+    var current, key, val, _ref2, _results;
+    component.gcCounter++;
+    if (component.gcCounter % config.gcFrequency === 0) {
+      current = new Date().getTime();
+      _ref2 = component.gcTimestamps;
+      _results = [];
+      for (key in _ref2) {
+        val = _ref2[key];
+        if ((current - val) > (config.gcTimeout * 1000)) {
+          component.dropRequest(key);
+          _results.push(delete component.gcTimestamps[key]);
+        } else {
+          _results.push(void 0);
+        }
+      }
+      return _results;
+    }
+  };
   _fn1 = function(port) {
-    var inPort;
+    var inPort, needPortGroups;
+    component.groupBuffers[port] = [];
+    component.keyBuffers[port] = null;
     if (config.receiveStreams && config.receiveStreams.indexOf(port) !== -1) {
       inPort = new StreamReceiver(component.inPorts[port]);
     } else {
       inPort = component.inPorts[port];
     }
-    inPort.groups = [];
-    return inPort.process = function(event, payload) {
-      var data, g, groups, grp, key, out, outs, p, postpone, postponedToQ, requiredLength, resume, task, whenDone, _len5, _len6, _len7, _len8, _len9, _n, _o, _p, _q, _r, _ref2;
+    needPortGroups = collectGroups instanceof Array && collectGroups.indexOf(port) !== -1;
+    return inPort.process = function(event, payload, index) {
+      var data, foundGroup, g, groupLength, groups, grp, i, key, obj, out, outs, postpone, postponedToQ, reqId, requiredLength, resume, task, tmp, whenDone, whenDoneGroups, _len5, _len6, _len7, _len8, _n, _o, _p, _q, _r, _ref2, _ref3, _ref4, _s;
       switch (event) {
         case 'begingroup':
-          return inPort.groups.push(payload);
+          component.groupBuffers[port].push(payload);
+          if (config.forwardGroups && (collectGroups === true || needPortGroups) && !config.async) {
+            return sendGroupToOuts(payload);
+          }
+          break;
         case 'endgroup':
-          return inPort.groups.pop();
-        case 'data':
-          key = '';
-          if (config.group && inPort.groups.length > 0) {
-            key = inPort.groups.toString();
-            if (config.group instanceof RegExp) {
-              if (!config.group.test(key)) {
-                key = '';
-              }
-            }
-          } else if (config.field && typeof payload === 'object' && config.field in payload) {
-            key = payload[config.field];
+          component.groupBuffers[port] = component.groupBuffers[port].slice(0, component.groupBuffers[port].length - 1);
+          if (config.forwardGroups && (collectGroups === true || needPortGroups) && !config.async) {
+            return closeGroupOnOuts(payload);
           }
-          if (!(key in groupedData)) {
-            groupedData[key] = {};
-          }
-          if (config.field) {
-            groupedData[key][config.field] = key;
-          }
+          break;
+        case 'disconnect':
           if (inPorts.length === 1) {
-            groupedData[key] = payload;
-          } else {
-            groupedData[key][port] = payload;
-          }
-          if (collectGroups instanceof Array && collectGroups.indexOf(port) !== -1) {
-            if (!(key in groupedDataGroups)) {
-              groupedDataGroups[key] = [];
-            }
-            _ref2 = inPort.groups;
-            for (_n = 0, _len5 = _ref2.length; _n < _len5; _n++) {
-              grp = _ref2[_n];
-              if (groupedDataGroups[key].indexOf(grp) === -1) {
-                groupedDataGroups[key].push(grp);
+            if (config.async || config.StreamSender) {
+              if (config.ordered) {
+                component.outputQ.push(null);
+                return processQueue();
+              } else {
+                return component.disconnectQ.push(true);
               }
-            }
-          }
-          requiredLength = inPorts.length;
-          if (config.field) {
-            ++requiredLength;
-          }
-          if (requiredLength === 1 || Object.keys(groupedData[key]).length === requiredLength) {
-            if (collectGroups === true) {
-              groups = inPort.groups;
             } else {
-              groups = groupedDataGroups[key];
+              return disconnectOuts();
             }
-            for (_o = 0, _len6 = inPorts.length; _o < _len6; _o++) {
-              p = inPorts[_o];
-              component.inPorts[p].groups = [];
+          } else {
+            foundGroup = false;
+            key = component.keyBuffers[port];
+            if (!(key in component.disconnectData)) {
+              component.disconnectData[key] = [];
             }
-            outs = {};
-            for (_p = 0, _len7 = outPorts.length; _p < _len7; _p++) {
-              name = outPorts[_p];
-              if (config.async || config.sendStreams && config.sendStreams.indexOf(name) !== -1) {
-                outs[name] = new StreamSender(component.outPorts[name], config.ordered);
-              } else {
-                outs[name] = component.outPorts[name];
-              }
-            }
-            if (outPorts.length === 1) {
-              outs = outs[outPorts[0]];
-            }
-            whenDone = function(err) {
-              var g, out, _len8, _len9, _q, _r;
-              if (err) {
-                component.error(err, groups);
-              }
-              if (typeof component.fail === 'function' && component.hasErrors) {
-                component.fail();
-              }
-              if (outPorts.length === 1) {
-                if (config.forwardGroups) {
-                  for (_q = 0, _len8 = groups.length; _q < _len8; _q++) {
-                    g = groups[_q];
-                    outs.endGroup();
-                  }
-                }
-                outs.disconnect();
-              } else {
-                for (name in outs) {
-                  out = outs[name];
-                  if (config.forwardGroups) {
-                    for (_r = 0, _len9 = groups.length; _r < _len9; _r++) {
-                      g = groups[_r];
-                      out.endGroup();
+            for (i = _n = 0, _ref2 = component.disconnectData[key].length; 0 <= _ref2 ? _n < _ref2 : _n > _ref2; i = 0 <= _ref2 ? ++_n : --_n) {
+              if (!(port in component.disconnectData[key][i])) {
+                foundGroup = true;
+                component.disconnectData[key][i][port] = true;
+                if (Object.keys(component.disconnectData[key][i]).length === inPorts.length) {
+                  component.disconnectData[key].shift();
+                  if (config.async || config.StreamSender) {
+                    if (config.ordered) {
+                      component.outputQ.push(null);
+                      processQueue();
+                    } else {
+                      component.disconnectQ.push(true);
                     }
+                  } else {
+                    disconnectOuts();
                   }
-                  out.disconnect();
+                  if (component.disconnectData[key].length === 0) {
+                    delete component.disconnectData[key];
+                  }
                 }
+                break;
               }
-              if (typeof component.afterProcess === 'function') {
-                return component.afterProcess(err || component.hasErrors, outs);
-              }
-            };
-            data = groupedData[key];
-            delete groupedData[key];
-            delete groupedDataGroups[key];
-            if (typeof component.beforeProcess === 'function') {
-              component.beforeProcess(outs);
             }
-            if (outPorts.length === 1) {
-              if (config.forwardGroups) {
-                for (_q = 0, _len8 = groups.length; _q < _len8; _q++) {
-                  g = groups[_q];
-                  outs.beginGroup(g);
+            if (!foundGroup) {
+              obj = {};
+              obj[port] = true;
+              return component.disconnectData[key].push(obj);
+            }
+          }
+          break;
+        case 'data':
+          if (inPorts.length === 1) {
+            if (inPort.isAddressable()) {
+              data = {};
+              data[index] = payload;
+            } else {
+              data = payload;
+            }
+            groups = component.groupBuffers[port];
+          } else {
+            key = '';
+            if (config.group && component.groupBuffers[port].length > 0) {
+              key = component.groupBuffers[port].toString();
+              if (config.group instanceof RegExp) {
+                reqId = null;
+                _ref3 = component.groupBuffers[port];
+                for (_o = 0, _len5 = _ref3.length; _o < _len5; _o++) {
+                  grp = _ref3[_o];
+                  if (config.group.test(grp)) {
+                    reqId = grp;
+                    break;
+                  }
                 }
+                key = reqId ? reqId : '';
+              }
+            } else if (config.field && typeof payload === 'object' && config.field in payload) {
+              key = payload[config.field];
+            }
+            component.keyBuffers[port] = key;
+            if (!(key in component.groupedData)) {
+              component.groupedData[key] = [];
+            }
+            if (!(key in component.groupedGroups)) {
+              component.groupedGroups[key] = [];
+            }
+            foundGroup = false;
+            requiredLength = inPorts.length;
+            if (config.field) {
+              ++requiredLength;
+            }
+            for (i = _p = 0, _ref4 = component.groupedData[key].length; 0 <= _ref4 ? _p < _ref4 : _p > _ref4; i = 0 <= _ref4 ? ++_p : --_p) {
+              if (!(port in component.groupedData[key][i]) || (component.inPorts[port].isAddressable() && config.arrayPolicy["in"] === 'all' && !(index in component.groupedData[key][i][port]))) {
+                foundGroup = true;
+                if (component.inPorts[port].isAddressable()) {
+                  if (!(port in component.groupedData[key][i])) {
+                    component.groupedData[key][i][port] = {};
+                  }
+                  component.groupedData[key][i][port][index] = payload;
+                } else {
+                  component.groupedData[key][i][port] = payload;
+                }
+                if (needPortGroups) {
+                  component.groupedGroups[key][i] = _.union(component.groupedGroups[key][i], component.groupBuffers[port]);
+                } else if (collectGroups === true) {
+                  component.groupedGroups[key][i][port] = component.groupBuffers[port];
+                }
+                if (component.inPorts[port].isAddressable() && config.arrayPolicy["in"] === 'all' && Object.keys(component.groupedData[key][i][port]).length < component.inPorts[port].listAttached().length) {
+                  return;
+                }
+                groupLength = Object.keys(component.groupedData[key][i]).length;
+                if (groupLength === requiredLength) {
+                  data = (component.groupedData[key].splice(i, 1))[0];
+                  groups = (component.groupedGroups[key].splice(i, 1))[0];
+                  if (collectGroups === true) {
+                    groups = _.intersection.apply(null, _.values(groups));
+                  }
+                  if (component.groupedData[key].length === 0) {
+                    delete component.groupedData[key];
+                  }
+                  if (component.groupedGroups[key].length === 0) {
+                    delete component.groupedGroups[key];
+                  }
+                  if (config.group && key) {
+                    delete component.gcTimestamps[key];
+                  }
+                  break;
+                } else {
+                  return;
+                }
+              }
+            }
+            if (!foundGroup) {
+              obj = {};
+              if (config.field) {
+                obj[config.field] = key;
+              }
+              obj[port] = payload;
+              component.groupedData[key].push(obj);
+              if (needPortGroups) {
+                component.groupedGroups[key].push(component.groupBuffers[port]);
+              } else if (collectGroups === true) {
+                tmp = {};
+                tmp[port] = component.groupBuffers[port];
+                component.groupedGroups[key].push(tmp);
+              } else {
+                component.groupedGroups[key].push([]);
+              }
+              if (config.group && key) {
+                component.gcTimestamps[key] = new Date().getTime();
+              }
+              return;
+            }
+          }
+          if (config.dropInput && component.completeParams.length !== component.requiredParams.length) {
+            return;
+          }
+          outs = {};
+          for (_q = 0, _len6 = outPorts.length; _q < _len6; _q++) {
+            name = outPorts[_q];
+            if (config.async || config.sendStreams && config.sendStreams.indexOf(name) !== -1) {
+              outs[name] = new StreamSender(component.outPorts[name], config.ordered);
+            } else {
+              outs[name] = component.outPorts[name];
+            }
+          }
+          if (outPorts.length === 1) {
+            outs = outs[outPorts[0]];
+          }
+          whenDoneGroups = groups.slice(0);
+          whenDone = function(err) {
+            var disconnect, out, outputs, _len7, _r;
+            if (err) {
+              component.error(err, whenDoneGroups);
+            }
+            if (typeof component.fail === 'function' && component.hasErrors) {
+              component.fail();
+            }
+            outputs = outPorts.length === 1 ? {
+              port: outs
+            } : outs;
+            disconnect = false;
+            if (component.disconnectQ.length > 0) {
+              component.disconnectQ.shift();
+              disconnect = true;
+            }
+            for (name in outputs) {
+              out = outputs[name];
+              if (config.forwardGroups && config.async) {
+                for (_r = 0, _len7 = whenDoneGroups.length; _r < _len7; _r++) {
+                  i = whenDoneGroups[_r];
+                  out.endGroup();
+                }
+              }
+              if (disconnect) {
+                out.disconnect();
+              }
+              if (config.async || config.StreamSender) {
+                out.done();
+              }
+            }
+            if (typeof component.afterProcess === 'function') {
+              return component.afterProcess(err || component.hasErrors, outs);
+            }
+          };
+          if (typeof component.beforeProcess === 'function') {
+            component.beforeProcess(outs);
+          }
+          if (config.forwardGroups && config.async) {
+            if (outPorts.length === 1) {
+              for (_r = 0, _len7 = groups.length; _r < _len7; _r++) {
+                g = groups[_r];
+                outs.beginGroup(g);
               }
             } else {
               for (name in outs) {
                 out = outs[name];
-                if (config.forwardGroups) {
-                  for (_r = 0, _len9 = groups.length; _r < _len9; _r++) {
-                    g = groups[_r];
-                    out.beginGroup(g);
-                  }
+                for (_s = 0, _len8 = groups.length; _s < _len8; _s++) {
+                  g = groups[_s];
+                  out.beginGroup(g);
                 }
               }
             }
-            if (config.async) {
-              postpone = function() {};
-              resume = function() {};
-              postponedToQ = false;
-              task = function() {
-                return proc.call(component, data, groups, outs, whenDone, postpone, resume);
-              };
-              postpone = function(backToQueue) {
-                if (backToQueue == null) {
-                  backToQueue = true;
-                }
-                postponedToQ = backToQueue;
-                if (backToQueue) {
-                  return taskQ.push(task);
-                }
-              };
-              resume = function() {
-                if (postponedToQ) {
-                  return resumeTaskQ();
-                } else {
-                  return task();
-                }
-              };
-            } else {
-              task = function() {
-                proc.call(component, data, groups, outs);
-                return whenDone();
-              };
-            }
-            taskQ.push(task);
-            return resumeTaskQ();
           }
+          exports.MultiError(component, config.name, config.error, groups);
+          if (config.async) {
+            postpone = function() {};
+            resume = function() {};
+            postponedToQ = false;
+            task = function() {
+              return proc.call(component, data, groups, outs, whenDone, postpone, resume);
+            };
+            postpone = function(backToQueue) {
+              if (backToQueue == null) {
+                backToQueue = true;
+              }
+              postponedToQ = backToQueue;
+              if (backToQueue) {
+                return component.taskQ.push(task);
+              }
+            };
+            resume = function() {
+              if (postponedToQ) {
+                return resumeTaskQ();
+              } else {
+                return task();
+              }
+            };
+          } else {
+            task = function() {
+              proc.call(component, data, groups, outs);
+              return whenDone();
+            };
+          }
+          component.taskQ.push(task);
+          resumeTaskQ();
+          return gc();
       }
     };
   };
@@ -8277,6 +8877,24 @@ exports.WirePattern = function(component, config, proc) {
     port = inPorts[_m];
     _fn1(port);
   }
+  baseShutdown = component.shutdown;
+  component.shutdown = function() {
+    baseShutdown.call(component);
+    component.groupedData = {};
+    component.groupedGroups = {};
+    component.outputQ = [];
+    component.disconnectData = {};
+    component.disconnectQ = [];
+    component.taskQ = [];
+    component.params = {};
+    component.completeParams = [];
+    component.receivedParams = [];
+    component.defaultsSent = false;
+    component.groupBuffers = {};
+    component.keyBuffers = {};
+    component.gcTimestamps = {};
+    return component.gcCounter = 0;
+  };
   return component;
 };
 
@@ -8298,15 +8916,16 @@ exports.CustomizeError = function(err, options) {
   return err;
 };
 
-exports.MultiError = function(component, group, errorPort) {
+exports.MultiError = function(component, group, errorPort, forwardedGroups) {
+  var baseShutdown;
   if (group == null) {
     group = '';
   }
   if (errorPort == null) {
     errorPort = 'error';
   }
-  if (!(errorPort in component.outPorts)) {
-    throw new Error("Missing error port '" + errorPort + "'");
+  if (forwardedGroups == null) {
+    forwardedGroups = [];
   }
   component.hasErrors = false;
   component.errors = [];
@@ -8316,7 +8935,7 @@ exports.MultiError = function(component, group, errorPort) {
     }
     component.errors.push({
       err: e,
-      groups: groups
+      groups: forwardedGroups.concat(groups)
     });
     return component.hasErrors = true;
   };
@@ -8332,6 +8951,12 @@ exports.MultiError = function(component, group, errorPort) {
       component.error(e, groups);
     }
     if (!component.hasErrors) {
+      return;
+    }
+    if (!(errorPort in component.outPorts)) {
+      return;
+    }
+    if (!component.outPorts[errorPort].isAttached()) {
       return;
     }
     if (group) {
@@ -8356,6 +8981,12 @@ exports.MultiError = function(component, group, errorPort) {
       component.outPorts[errorPort].endGroup();
     }
     component.outPorts[errorPort].disconnect();
+    component.hasErrors = false;
+    return component.errors = [];
+  };
+  baseShutdown = component.shutdown;
+  component.shutdown = function() {
+    baseShutdown.call(component);
     component.hasErrors = false;
     return component.errors = [];
   };
@@ -8518,7 +9149,7 @@ StreamSender = (function() {
     return this;
   };
 
-  StreamSender.prototype.disconnect = function() {
+  StreamSender.prototype.done = function() {
     if (this.ordered) {
       this.resolved = true;
     } else {
@@ -8527,17 +9158,26 @@ StreamSender = (function() {
     return this;
   };
 
+  StreamSender.prototype.disconnect = function() {
+    this.q.push(null);
+    return this;
+  };
+
   StreamSender.prototype.flush = function() {
     var ip, res, _i, _len, _ref;
     res = false;
     if (this.q.length > 0) {
-      this.port.connect();
       _ref = this.q;
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         ip = _ref[_i];
-        ip.sendTo(this.port);
+        if (ip === null) {
+          if (this.port.isConnected()) {
+            this.port.disconnect();
+          }
+        } else {
+          ip.sendTo(this.port);
+        }
       }
-      this.port.disconnect();
       res = true;
     }
     this.q = [];
@@ -8663,22 +9303,12 @@ Graph = (function(_super) {
         description: 'NoFlo graph definition to be used with the subgraph component',
         required: true,
         immediate: true
-      },
-      start: {
-        datatype: 'bang',
-        description: 'if attached, the network will only be started when receiving a start message',
-        required: false
       }
     });
     this.outPorts = new noflo.OutPorts;
     this.inPorts.on('graph', 'data', (function(_this) {
       return function(data) {
         return _this.setGraph(data);
-      };
-    })(this));
-    this.inPorts.on('start', 'data', (function(_this) {
-      return function() {
-        return _this.start();
       };
     })(this));
   }
@@ -8717,7 +9347,7 @@ Graph = (function(_super) {
         _this.network = network;
         _this.emit('network', _this.network);
         return _this.network.connect(function() {
-          var name, notReady, process, _ref, _ref1;
+          var name, notReady, process, _ref;
           notReady = false;
           _ref = _this.network.processes;
           for (name in _ref) {
@@ -8727,31 +9357,27 @@ Graph = (function(_super) {
             }
           }
           if (!notReady) {
-            _this.setToReady();
+            return _this.setToReady();
           }
-          if (((_ref1 = _this.inPorts.start) != null ? _ref1.isAttached() : void 0) && !_this.started) {
-            return;
-          }
-          return _this.start(graph);
         });
       };
     })(this), true);
   };
 
-  Graph.prototype.start = function(graph) {
-    this.started = true;
+  Graph.prototype.start = function() {
+    if (!this.isReady()) {
+      this.on('ready', (function(_this) {
+        return function() {
+          return _this.start();
+        };
+      })(this));
+      return;
+    }
     if (!this.network) {
       return;
     }
-    this.network.sendInitials();
-    if (!graph) {
-      return;
-    }
-    return graph.on('addInitial', (function(_this) {
-      return function() {
-        return _this.network.sendInitials();
-      };
-    })(this));
+    this.started = true;
+    return this.network.start();
   };
 
   Graph.prototype.checkComponent = function(name, process) {
@@ -8861,6 +9487,14 @@ Graph = (function(_super) {
         continue;
       }
       this.inPorts.add(targetPortName, port);
+      this.inPorts[targetPortName].once('connect', (function(_this) {
+        return function() {
+          if (_this.isStarted()) {
+            return;
+          }
+          return _this.start();
+        };
+      })(this));
     }
     _ref1 = process.component.outPorts;
     for (portName in _ref1) {
@@ -9135,58 +9769,40 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-dom/components/GetAttribute.js", function(exports, require, module){
-var GetAttribute, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+'use strict';
+var noflo;
 
 noflo = require('noflo');
 
-GetAttribute = (function(_super) {
-  __extends(GetAttribute, _super);
-
-  function GetAttribute() {
-    this.attribute = null;
-    this.element = null;
-    this.inPorts = {
-      element: new noflo.Port('object'),
-      attribute: new noflo.Port('string')
-    };
-    this.outPorts = {
-      out: new noflo.Port('string')
-    };
-    this.inPorts.element.on('data', (function(_this) {
-      return function(data) {
-        _this.element = data;
-        if (_this.attribute) {
-          return _this.getAttribute();
-        }
-      };
-    })(this));
-    this.inPorts.attribute.on('data', (function(_this) {
-      return function(data) {
-        _this.attribute = data;
-        if (_this.element) {
-          return _this.getAttribute();
-        }
-      };
-    })(this));
-  }
-
-  GetAttribute.prototype.getAttribute = function() {
-    var value;
-    value = this.element.getAttribute(this.attribute);
-    this.outPorts.out.beginGroup(this.attribute);
-    this.outPorts.out.send(value);
-    this.outPorts.out.endGroup();
-    return this.outPorts.out.disconnect();
-  };
-
-  return GetAttribute;
-
-})(noflo.Component);
-
 exports.getComponent = function() {
-  return new GetAttribute;
+  var c;
+  c = new noflo.Component;
+  c.description = "Reads the given attribute from the DOM element on the in port.";
+  c.inPorts.add('element', {
+    datatype: 'object',
+    description: 'The element from which to read the attribute from.',
+    required: true
+  });
+  c.inPorts.add('attribute', {
+    datatype: 'string',
+    description: 'The attribute which is read from the DOM element.',
+    required: true
+  });
+  c.outPorts.add('out', {
+    datatype: 'string',
+    description: 'Value of the attribute being read.'
+  });
+  return noflo.helpers.WirePattern(c, {
+    "in": ['element'],
+    out: ['out'],
+    params: ['attribute'],
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var attr, value;
+    attr = c.params.attribute;
+    value = data.getAttribute(attr);
+    return out.send(value);
+  });
 };
 
 });
@@ -9745,7 +10361,7 @@ require.register("noflo-noflo-core/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-core/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.0","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*"},"remotes":["https://raw.githubusercontent.com"],"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","MakeFunction":"components/MakeFunction.js","Merge":"components/Merge.js","Output":"components/Output.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","SendNext":"components/SendNext.js","Split":"components/Split.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.8","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*"},"remotes":["https://raw.githubusercontent.com"],"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js","components/ReadGlobal.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","MakeFunction":"components/MakeFunction.js","Merge":"components/Merge.js","Output":"components/Output.js","ReadGlobal":"components/ReadGlobal.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","SendNext":"components/SendNext.js","Split":"components/Split.js"}}}');
 });
 require.register("noflo-noflo-core/components/Callback.js", function(exports, require, module){
 var Callback, noflo, _,
@@ -10819,6 +11435,51 @@ exports.getComponent = function() {
 };
 
 });
+require.register("noflo-noflo-core/components/ReadGlobal.js", function(exports, require, module){
+var noflo;
+
+noflo = require('noflo');
+
+exports.getComponent = function() {
+  var c, isNode;
+  isNode = typeof window === 'undefined';
+  c = new noflo.Component;
+  c.description = 'Returns the value of a global variable.';
+  c.icon = 'usd';
+  c.inPorts.add('name', {
+    description: 'The name of the global variable.',
+    required: true
+  });
+  c.outPorts.add('value', {
+    description: 'The value of the variable.',
+    required: false
+  });
+  c.outPorts.add('error', {
+    description: 'Any errors that occured reading the variables value.',
+    required: false
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": ['name'],
+    out: ['value'],
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var err, value;
+    value = isNode ? global[data] : window[data];
+    if (typeof value === 'undefined') {
+      err = new Error("\"" + data + "\" is undefined on the global object.");
+      if (c.outPorts.error.isAttached()) {
+        return c.outPorts.error.send(err);
+      } else {
+        throw err;
+      }
+    } else {
+      return out.send(value);
+    }
+  });
+  return c;
+};
+
+});
 require.register("noflo-noflo-css/index.js", function(exports, require, module){
 /*
  * This file can be used for general library features that are exposed as CommonJS modules
@@ -11015,6 +11676,340 @@ exports.getComponent = function() {
 };
 
 });
+require.register("mrluc-owl-deepcopy/deep_copy.js", function(exports, require, module){
+/* This file is part of OWL JavaScript Utilities.
+
+OWL JavaScript Utilities is free software: you can redistribute it and/or 
+modify it under the terms of the GNU Lesser General Public License
+as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version.
+
+OWL JavaScript Utilities is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public 
+License along with OWL JavaScript Utilities.  If not, see 
+<http://www.gnu.org/licenses/>.
+*/
+
+/*
+  Hey, so, this deep copy is still the only attempt at a truly
+  comprehensive approach, even years later. Kudos to the original
+  author, one 'Oran Looney' (or, at least, that's what his blog
+  sez'.
+
+  All I did was lift it out of the closure wrapper to make it
+  CommonJS requireable.
+*/
+
+
+function Clone() {}
+
+// clone objects, skip other types.
+function clone(target) {
+  if ( typeof target == 'object' ) {
+    Clone.prototype = target;
+    return new Clone();
+  } else {
+    return target;
+  }
+}
+
+
+// Shallow Copy 
+function copy(target) {
+  if (typeof target !== 'object' ) {
+    return target;  // non-object have value sematics, so target is already a copy.
+  } else {
+    var value = target.valueOf();
+    if (target != value) { 
+      // the object is a standard object wrapper for a native type, say String.
+      // we can make a copy by instantiating a new object around the value.
+      return new target.constructor(value);
+    } else {
+      // ok, we have a normal object. If possible, we'll clone the original's prototype 
+      // (not the original) to get an empty object with the same prototype chain as
+      // the original.  If just copy the instance properties.  Otherwise, we have to 
+      // copy the whole thing, property-by-property.
+      if ( target instanceof target.constructor && target.constructor !== Object ) { 
+	var c = clone(target.constructor.prototype);
+	
+	// give the copy all the instance properties of target.  It has the same
+	// prototype as target, so inherited properties are already there.
+	for ( var property in target) { 
+	  if (target.hasOwnProperty(property)) {
+	    c[property] = target[property];
+	  } 
+	}
+      } else {
+	var c = {};
+	for ( var property in target ) c[property] = target[property];
+      }
+      
+      return c;
+    }
+  }
+}
+
+// Deep Copy
+var deepCopiers = [];
+
+function DeepCopier(config) {
+  for ( var key in config ) this[key] = config[key];
+}
+DeepCopier.prototype = {
+  constructor: DeepCopier,
+  
+  // determines if this DeepCopier can handle the given object.
+  canCopy: function(source) { return false; },
+  
+  // starts the deep copying process by creating the copy object.  You
+  // can initialize any properties you want, but you can't call recursively
+  // into the DeeopCopyAlgorithm.
+  create: function(source) { },
+  
+  // Completes the deep copy of the source object by populating any properties
+  // that need to be recursively deep copied.  You can do this by using the
+  // provided deepCopyAlgorithm instance's deepCopy() method.  This will handle
+  // cyclic references for objects already deepCopied, including the source object
+  // itself.  The "result" passed in is the object returned from create().
+  populate: function(deepCopyAlgorithm, source, result) {}
+};
+
+function DeepCopyAlgorithm() {
+  // copiedObjects keeps track of objects already copied by this
+  // deepCopy operation, so we can correctly handle cyclic references.
+  this.copiedObjects = [];
+  var thisPass = this;
+  this.recursiveDeepCopy = function(source) {
+    return thisPass.deepCopy(source);
+  }
+  this.depth = 0;
+}
+DeepCopyAlgorithm.prototype = {
+  constructor: DeepCopyAlgorithm,
+  
+  maxDepth: 256,
+  
+  // add an object to the cache.  No attempt is made to filter duplicates;
+  // we always check getCachedResult() before calling it.
+  cacheResult: function(source, result) {
+    this.copiedObjects.push([source, result]);
+  },
+  
+  // Returns the cached copy of a given object, or undefined if it's an
+  // object we haven't seen before.
+  getCachedResult: function(source) {
+    var copiedObjects = this.copiedObjects;
+    var length = copiedObjects.length;
+    for ( var i=0; i<length; i++ ) {
+      if ( copiedObjects[i][0] === source ) {
+	return copiedObjects[i][1];
+      }
+    }
+    return undefined;
+  },
+  
+  // deepCopy handles the simple cases itself: non-objects and object's we've seen before.
+  // For complex cases, it first identifies an appropriate DeepCopier, then calls
+  // applyDeepCopier() to delegate the details of copying the object to that DeepCopier.
+  deepCopy: function(source) {
+    // null is a special case: it's the only value of type 'object' without properties.
+    if ( source === null ) return null;
+    
+    // All non-objects use value semantics and don't need explict copying.
+    if ( typeof source !== 'object' ) return source;
+    
+    var cachedResult = this.getCachedResult(source);
+    
+    // we've already seen this object during this deep copy operation
+    // so can immediately return the result.  This preserves the cyclic
+    // reference structure and protects us from infinite recursion.
+    if ( cachedResult ) return cachedResult;
+    
+    // objects may need special handling depending on their class.  There is
+    // a class of handlers call "DeepCopiers"  that know how to copy certain
+    // objects.  There is also a final, generic deep copier that can handle any object.
+    for ( var i=0; i<deepCopiers.length; i++ ) {
+      var deepCopier = deepCopiers[i];
+      if ( deepCopier.canCopy(source) ) {
+	return this.applyDeepCopier(deepCopier, source);
+      }
+    }
+    // the generic copier can handle anything, so we should never reach this line.
+    throw new Error("no DeepCopier is able to copy " + source);
+  },
+  
+  // once we've identified which DeepCopier to use, we need to call it in a very
+  // particular order: create, cache, populate.  This is the key to detecting cycles.
+  // We also keep track of recursion depth when calling the potentially recursive
+  // populate(): this is a fail-fast to prevent an infinite loop from consuming all
+  // available memory and crashing or slowing down the browser.
+  applyDeepCopier: function(deepCopier, source) {
+    // Start by creating a stub object that represents the copy.
+    var result = deepCopier.create(source);
+    
+    // we now know the deep copy of source should always be result, so if we encounter
+    // source again during this deep copy we can immediately use result instead of
+    // descending into it recursively.  
+    this.cacheResult(source, result);
+    
+    // only DeepCopier::populate() can recursively deep copy.  So, to keep track
+    // of recursion depth, we increment this shared counter before calling it,
+    // and decrement it afterwards.
+    this.depth++;
+    if ( this.depth > this.maxDepth ) {
+      throw new Error("Exceeded max recursion depth in deep copy.");
+    }
+    
+    // It's now safe to let the deepCopier recursively deep copy its properties.
+    deepCopier.populate(this.recursiveDeepCopy, source, result);
+    
+    this.depth--;
+    
+    return result;
+  }
+};
+
+// entry point for deep copy.
+//   source is the object to be deep copied.
+//   maxDepth is an optional recursion limit. Defaults to 256.
+function deepCopy(source, maxDepth) {
+  var deepCopyAlgorithm = new DeepCopyAlgorithm();
+  if ( maxDepth ) deepCopyAlgorithm.maxDepth = maxDepth;
+  return deepCopyAlgorithm.deepCopy(source);
+}
+
+// publicly expose the DeepCopier class.
+deepCopy.DeepCopier = DeepCopier;
+
+// publicly expose the list of deepCopiers.
+deepCopy.deepCopiers = deepCopiers;
+
+// make deepCopy() extensible by allowing others to 
+// register their own custom DeepCopiers.
+deepCopy.register = function(deepCopier) {
+  if ( !(deepCopier instanceof DeepCopier) ) {
+    deepCopier = new DeepCopier(deepCopier);
+  }
+  deepCopiers.unshift(deepCopier);
+}
+
+// Generic Object copier
+// the ultimate fallback DeepCopier, which tries to handle the generic case.  This
+// should work for base Objects and many user-defined classes.
+deepCopy.register({
+  canCopy: function(source) { return true; },
+  
+  create: function(source) {
+    if ( source instanceof source.constructor ) {
+      return clone(source.constructor.prototype);
+    } else {
+      return {};
+    }
+  },
+  
+  populate: function(deepCopy, source, result) {
+    for ( var key in source ) {
+      if ( source.hasOwnProperty(key) ) {
+	result[key] = deepCopy(source[key]);
+      }
+    }
+    return result;
+  }
+});
+
+// Array copier
+deepCopy.register({
+  canCopy: function(source) {
+    return ( source instanceof Array );
+  },
+  
+  create: function(source) {
+    return new source.constructor();
+  },
+  
+  populate: function(deepCopy, source, result) {
+    for ( var i=0; i<source.length; i++) {
+      result.push( deepCopy(source[i]) );
+    }
+    return result;
+  }
+});
+
+// Date copier
+deepCopy.register({
+  canCopy: function(source) {
+    return ( source instanceof Date );
+  },
+  
+  create: function(source) {
+    return new Date(source);
+  }
+});
+
+// HTML DOM Node
+
+// utility function to detect Nodes.  In particular, we're looking
+// for the cloneNode method.  The global document is also defined to
+// be a Node, but is a special case in many ways.
+function isNode(source) {
+  return false; // LJF change here -- I don't care that I am breaking
+  // this for the browser. at all.
+  if ( window.Node ) {
+    return source instanceof Node;
+  } else {
+    // the document is a special Node and doesn't have many of
+    // the common properties so we use an identity check instead.
+    if ( source === document ) return true;
+    return (
+      typeof source.nodeType === 'number' &&
+	source.attributes &&
+	source.childNodes &&
+	source.cloneNode
+    );
+  }
+}
+
+// Node copier
+deepCopy.register({
+  canCopy: function(source) { return isNode(source); },
+  
+  create: function(source) {
+    // there can only be one (document).
+    if ( source === document ) return document;
+    
+    // start with a shallow copy.  We'll handle the deep copy of
+    // its children ourselves.
+    return source.cloneNode(false);
+  },
+  
+  populate: function(deepCopy, source, result) {
+    // we're not copying the global document, so don't have to populate it either.
+    if ( source === document ) return document;
+    
+    // if this Node has children, deep copy them one-by-one.
+    if ( source.childNodes && source.childNodes.length ) {
+      for ( var i=0; i<source.childNodes.length; i++ ) {
+	var childCopy = deepCopy(source.childNodes[i]);
+	result.appendChild(childCopy);
+      }
+    }
+  }
+});
+
+exports.DeepCopyAlgorithm = DeepCopyAlgorithm;
+exports.copy = copy;
+exports.clone = clone;
+exports.deepCopy = deepCopy;
+
+
+});
+require.register("mrluc-owl-deepcopy/component.json", function(exports, require, module){
+module.exports = JSON.parse('{"name":"owl-deepcopy","version":"0.0.2","description":"Packaged http://oranlooney.com/deep-copy-javascript/ for npm","author":"Oran Looney","repo":"mrluc/owl-deepcopy","main":"deep_copy.js","scripts":["deep_copy.js"],"json":["component.json"]}');
+});
 require.register("noflo-noflo-objects/index.js", function(exports, require, module){
 /*
  * This file can be used for general library features of objects.
@@ -11025,7 +12020,7 @@ require.register("noflo-noflo-objects/index.js", function(exports, require, modu
 
 });
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*","mrluc/owl-deepcopy":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js","components/FilterProperty.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterProperty":"components/FilterProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
 });
 require.register("noflo-noflo-objects/components/Extend.js", function(exports, require, module){
 var Extend, noflo, _,
@@ -11713,96 +12708,46 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/InsertProperty.js", function(exports, require, module){
-var InsertProperty, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo, _;
 
-noflo = require("noflo");
+noflo = require('noflo');
 
-_ = require("underscore");
-
-InsertProperty = (function(_super) {
-  __extends(InsertProperty, _super);
-
-  InsertProperty.prototype.description = "Insert a property into incoming objects.";
-
-  function InsertProperty() {
-    this.properties = {};
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'object',
-        description: 'Object to insert property into'
-      },
-      property: {
-        datatype: 'all',
-        description: 'Property to insert (property sent as group, value sent as IP)'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'object',
-        description: 'Object received as input with added properties'
-      }
-    });
-    this.inPorts.property.on("connect", (function(_this) {
-      return function() {
-        return _this.properties = {};
-      };
-    })(this));
-    this.inPorts.property.on("begingroup", (function(_this) {
-      return function(key) {
-        _this.key = key;
-      };
-    })(this));
-    this.inPorts.property.on("data", (function(_this) {
-      return function(value) {
-        if (_this.key != null) {
-          return _this.properties[_this.key] = value;
-        }
-      };
-    })(this));
-    this.inPorts.property.on("endgroup", (function(_this) {
-      return function() {
-        return _this.key = null;
-      };
-    })(this));
-    this.inPorts["in"].on("begingroup", (function(_this) {
-      return function(group) {
-        return _this.outPorts.out.beginGroup(group);
-      };
-    })(this));
-    this.inPorts["in"].on("data", (function(_this) {
-      return function(data) {
-        var key, value, _ref;
-        if (!_.isObject(data)) {
-          data = {};
-        }
-        _ref = _this.properties;
-        for (key in _ref) {
-          value = _ref[key];
-          data[key] = value;
-        }
-        return _this.outPorts.out.send(data);
-      };
-    })(this));
-    this.inPorts["in"].on("endgroup", (function(_this) {
-      return function(group) {
-        return _this.outPorts.out.endGroup();
-      };
-    })(this));
-    this.inPorts["in"].on("disconnect", (function(_this) {
-      return function() {
-        return _this.outPorts.out.disconnect();
-      };
-    })(this));
-  }
-
-  return InsertProperty;
-
-})(noflo.Component);
+_ = require('underscore');
 
 exports.getComponent = function() {
-  return new InsertProperty;
+  var c, key;
+  key = null;
+  c = new noflo.Component;
+  c.description = 'Insert a property into incoming objects.';
+  c.inPorts.add('in', {
+    datatype: 'object',
+    description: 'Object to insert property into'
+  });
+  c.inPorts.add('property', {
+    datatype: 'all',
+    description: 'Property to insert (property sent as group, value sent as IP)',
+    required: true
+  });
+  c.outPorts.add('out', {
+    datatype: 'object',
+    description: 'Object received as input with added properties'
+  });
+  c.inPorts.property.on('begingroup', function(group) {
+    return key = group;
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": ['in'],
+    params: ['property'],
+    out: ['out'],
+    forwardGroups: false
+  }, function(data, groups, out) {
+    if (!(data instanceof Object)) {
+      data = {};
+    }
+    data[key] = c.params.property;
+    return out.send(data);
+  });
+  return c;
 };
 
 });
@@ -11833,7 +12778,7 @@ SliceArray = (function(_super) {
         description: 'End of the slicing'
       }
     });
-    this.outPorts = {
+    this.outPorts = new noflo.OutPorts({
       out: {
         datatype: 'array',
         description: 'Result of the slice operation'
@@ -11841,7 +12786,7 @@ SliceArray = (function(_super) {
       error: {
         datatype: 'string'
       }
-    };
+    });
     this.inPorts.begin.on('data', (function(_this) {
       return function(data) {
         return _this.begin = data;
@@ -13442,6 +14387,190 @@ exports.getComponent = function() {
 };
 
 });
+require.register("noflo-noflo-objects/components/FilterProperty.js", function(exports, require, module){
+var FilterProperty, deepCopy, noflo, _,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+noflo = require("noflo");
+
+_ = require("underscore");
+
+deepCopy = require("owl-deepcopy").deepCopy;
+
+FilterProperty = (function(_super) {
+  __extends(FilterProperty, _super);
+
+  FilterProperty.prototype.icon = 'filter';
+
+  FilterProperty.prototype.description = "Filter out some properties by matching RegExps against the keys of incoming objects";
+
+  function FilterProperty() {
+    this.keys = [];
+    this.recurse = false;
+    this.keep = false;
+    this.legacy = false;
+    this.accepts = [];
+    this.regexps = [];
+    this.inPorts = new noflo.InPorts({
+      "in": {
+        datatype: 'object',
+        description: 'Object to filter properties from'
+      },
+      key: {
+        datatype: 'string',
+        description: 'Keys to filter (one key per IP)'
+      },
+      recurse: {
+        datatype: 'string',
+        description: '"true" to recurse on the object\'s values'
+      },
+      keep: {
+        datatype: 'string',
+        description: '"true" if matching properties must be kept, otherwise removed'
+      },
+      accept: {
+        datatype: 'all'
+      },
+      regexp: {
+        datatype: 'all'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'object'
+      }
+    });
+    this.inPorts.keep.on("data", (function(_this) {
+      return function(keep) {
+        if (keep === "true") {
+          return _this.keep = true;
+        }
+      };
+    })(this));
+    this.inPorts.recurse.on("data", (function(_this) {
+      return function(data) {
+        if (data === "true") {
+          return _this.recurse = true;
+        }
+      };
+    })(this));
+    this.inPorts.key.on("connect", (function(_this) {
+      return function() {
+        return _this.keys = [];
+      };
+    })(this));
+    this.inPorts.key.on("data", (function(_this) {
+      return function(key) {
+        return _this.keys.push(new RegExp(key, "g"));
+      };
+    })(this));
+    this.inPorts.accept.on("data", (function(_this) {
+      return function(data) {
+        _this.legacy = true;
+        return _this.accepts.push(data);
+      };
+    })(this));
+    this.inPorts.regexp.on("data", (function(_this) {
+      return function(data) {
+        _this.legacy = true;
+        return _this.regexps.push(data);
+      };
+    })(this));
+    this.inPorts["in"].on("begingroup", (function(_this) {
+      return function(group) {
+        return _this.outPorts.out.beginGroup(group);
+      };
+    })(this));
+    this.inPorts["in"].on("data", (function(_this) {
+      return function(data) {
+        if (_this.legacy) {
+          return _this.filterData(data);
+        } else {
+          if (_.isObject(data)) {
+            data = deepCopy(data);
+            _this.filter(data);
+            return _this.outPorts.out.send(data);
+          }
+        }
+      };
+    })(this));
+    this.inPorts["in"].on("endgroup", (function(_this) {
+      return function(group) {
+        return _this.outPorts.out.endGroup();
+      };
+    })(this));
+    this.inPorts["in"].on("disconnect", (function(_this) {
+      return function() {
+        return _this.outPorts.out.disconnect();
+      };
+    })(this));
+  }
+
+  FilterProperty.prototype.filter = function(object) {
+    var filter, isMatched, key, match, value, _i, _len, _ref, _results;
+    if (_.isEmpty(object)) {
+      return;
+    }
+    _results = [];
+    for (key in object) {
+      value = object[key];
+      isMatched = false;
+      _ref = this.keys;
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        filter = _ref[_i];
+        match = key.match(filter);
+        if (!this.keep && match || this.keep && !match) {
+          delete object[key];
+          isMatched = true;
+          break;
+        }
+      }
+      if (!isMatched && _.isObject(value) && this.recurse) {
+        _results.push(this.filter(value));
+      } else {
+        _results.push(void 0);
+      }
+    }
+    return _results;
+  };
+
+  FilterProperty.prototype.filterData = function(object) {
+    var expression, match, newData, property, regexp, value, _i, _len, _ref;
+    newData = {};
+    match = false;
+    for (property in object) {
+      value = object[property];
+      if (this.accepts.indexOf(property) !== -1) {
+        newData[property] = value;
+        match = true;
+        continue;
+      }
+      _ref = this.regexps;
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        expression = _ref[_i];
+        regexp = new RegExp(expression);
+        if (regexp.exec(property)) {
+          newData[property] = value;
+          match = true;
+        }
+      }
+    }
+    if (!match) {
+      return;
+    }
+    return this.outPorts.out.send(newData);
+  };
+
+  return FilterProperty;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new FilterProperty;
+};
+
+});
 require.register("noflo-noflo-math/index.js", function(exports, require, module){
 /*
  * This file can be used for general library features of noflo-math.
@@ -13452,7 +14581,54 @@ require.register("noflo-noflo-math/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-math/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Add.js","components/Ceil.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","components/Modulo.js","components/Random.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Ceil":"components/Ceil.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","Modulo":"components/Modulo.js","Multiply":"components/Multiply.js","Random":"components/Random.js","Subtract":"components/Subtract.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Accumulate.js","components/Add.js","components/Ceil.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","components/Modulo.js","components/Random.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Accumulate":"components/Accumulate.js","Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Ceil":"components/Ceil.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","Modulo":"components/Modulo.js","Multiply":"components/Multiply.js","Random":"components/Random.js","Subtract":"components/Subtract.js"}}}');
+});
+require.register("noflo-noflo-math/components/Accumulate.js", function(exports, require, module){
+var noflo;
+
+noflo = require('noflo');
+
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.description = 'Accumulate numbers coming from the input port';
+  c.inPorts.add('in', {
+    datatype: 'number',
+    description: 'Numbers to accumulate'
+  });
+  c.inPorts.add('reset', {
+    datatype: 'bang',
+    description: 'Reset accumulation counter',
+    process: function(event, data) {
+      if (event !== 'data') {
+        return;
+      }
+      c.counter = 0;
+      c.outPorts.out.send(c.counter);
+      return c.outPorts.out.disconnect();
+    }
+  });
+  c.inPorts.add('emitreset', {
+    datatype: 'boolean',
+    description: 'Whether to emit an output upon reset',
+    process: function(event, data) {
+      if (event !== 'data') {
+        return;
+      }
+      return c.emitReset = data;
+    }
+  });
+  c.outPorts.add('out', {
+    datatype: 'number'
+  });
+  c.counter = 0;
+  noflo.helpers.MapComponent(c, function(data, groups, out) {
+    c.counter += data;
+    return out.send(c.counter);
+  });
+  return c;
+};
+
 });
 require.register("noflo-noflo-math/components/Add.js", function(exports, require, module){
 var Add, MathComponent,
@@ -14182,7 +15358,7 @@ module.exports = {
     "flow"
   ],
   "repo": "noflo/noflo",
-  "version": "0.5.6",
+  "version": "0.5.9",
   "dependencies": {
     "bergie/emitter": "*",
     "jashkenas/underscore": "*",
@@ -14283,7 +15459,7 @@ module.exports = {
   "name": "noflo-core",
   "description": "NoFlo Essentials",
   "repo": "noflo/noflo-core",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "author": {
     "name": "Henri Bergius",
     "email": "henri.bergius@iki.fi"
@@ -14322,7 +15498,8 @@ module.exports = {
     "components/RunInterval.js",
     "components/RunTimeout.js",
     "components/MakeFunction.js",
-    "index.js"
+    "index.js",
+    "components/ReadGlobal.js"
   ],
   "json": [
     "component.json"
@@ -14337,6 +15514,7 @@ module.exports = {
       "MakeFunction": "components/MakeFunction.js",
       "Merge": "components/Merge.js",
       "Output": "components/Output.js",
+      "ReadGlobal": "components/ReadGlobal.js",
       "Repeat": "components/Repeat.js",
       "RepeatAsync": "components/RepeatAsync.js",
       "RepeatDelayed": "components/RepeatDelayed.js",
@@ -14378,6 +15556,23 @@ module.exports = {
   }
 }
 });
+require.register("mrluc-owl-deepcopy/component.json", function(exports, require, module){
+module.exports = {
+    "name": "owl-deepcopy",
+    "version": "0.0.2",
+    "description": "Packaged http://oranlooney.com/deep-copy-javascript/ for npm",
+    "author": "Oran Looney",
+    "repo": "mrluc/owl-deepcopy",
+    "main": "deep_copy.js",
+    "scripts": [
+      "deep_copy.js"
+    ],
+    "json": [
+      "component.json"
+    ]
+}
+
+});
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
 module.exports = {
   "name": "noflo-objects",
@@ -14392,7 +15587,8 @@ module.exports = {
   "repo": "noflo/objects",
   "dependencies": {
     "noflo/noflo": "*",
-    "jashkenas/underscore": "*"
+    "jashkenas/underscore": "*",
+    "mrluc/owl-deepcopy": "*"
   },
   "scripts": [
     "components/Extend.js",
@@ -14422,7 +15618,8 @@ module.exports = {
     "components/SetPropertyValue.js",
     "components/CallMethod.js",
     "index.js",
-    "components/GetCurrentTimestamp.js"
+    "components/GetCurrentTimestamp.js",
+    "components/FilterProperty.js"
   ],
   "json": [
     "component.json"
@@ -14436,6 +15633,7 @@ module.exports = {
       "DuplicateProperty": "components/DuplicateProperty.js",
       "Extend": "components/Extend.js",
       "ExtractProperty": "components/ExtractProperty.js",
+      "FilterProperty": "components/FilterProperty.js",
       "FilterPropertyValue": "components/FilterPropertyValue.js",
       "FlattenObject": "components/FlattenObject.js",
       "GetCurrentTimestamp": "components/GetCurrentTimestamp.js",
@@ -14473,6 +15671,7 @@ module.exports = {
     "noflo/noflo": "*"
   },
   "scripts": [
+    "components/Accumulate.js",
     "components/Add.js",
     "components/Ceil.js",
     "components/Subtract.js",
@@ -14494,6 +15693,7 @@ module.exports = {
   "noflo": {
     "icon": "plus-circle",
     "components": {
+      "Accumulate": "components/Accumulate.js",
       "Add": "components/Add.js",
       "CalculateAngle": "components/CalculateAngle.js",
       "CalculateDistance": "components/CalculateDistance.js",
@@ -14611,6 +15811,7 @@ require.alias("noflo-noflo-core/components/RunInterval.js", "bar/deps/noflo-core
 require.alias("noflo-noflo-core/components/RunTimeout.js", "bar/deps/noflo-core/components/RunTimeout.js");
 require.alias("noflo-noflo-core/components/MakeFunction.js", "bar/deps/noflo-core/components/MakeFunction.js");
 require.alias("noflo-noflo-core/index.js", "bar/deps/noflo-core/index.js");
+require.alias("noflo-noflo-core/components/ReadGlobal.js", "bar/deps/noflo-core/components/ReadGlobal.js");
 require.alias("noflo-noflo-core/index.js", "noflo-core/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-core/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-core/deps/noflo/src/lib/InternalSocket.js");
@@ -14708,6 +15909,7 @@ require.alias("noflo-noflo-objects/components/SetPropertyValue.js", "bar/deps/no
 require.alias("noflo-noflo-objects/components/CallMethod.js", "bar/deps/noflo-objects/components/CallMethod.js");
 require.alias("noflo-noflo-objects/index.js", "bar/deps/noflo-objects/index.js");
 require.alias("noflo-noflo-objects/components/GetCurrentTimestamp.js", "bar/deps/noflo-objects/components/GetCurrentTimestamp.js");
+require.alias("noflo-noflo-objects/components/FilterProperty.js", "bar/deps/noflo-objects/components/FilterProperty.js");
 require.alias("noflo-noflo-objects/index.js", "noflo-objects/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-objects/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-objects/deps/noflo/src/lib/InternalSocket.js");
@@ -14742,6 +15944,10 @@ require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-objects/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-objects/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
+require.alias("mrluc-owl-deepcopy/deep_copy.js", "noflo-noflo-objects/deps/owl-deepcopy/deep_copy.js");
+require.alias("mrluc-owl-deepcopy/deep_copy.js", "noflo-noflo-objects/deps/owl-deepcopy/index.js");
+require.alias("mrluc-owl-deepcopy/deep_copy.js", "mrluc-owl-deepcopy/index.js");
+require.alias("noflo-noflo-math/components/Accumulate.js", "bar/deps/noflo-math/components/Accumulate.js");
 require.alias("noflo-noflo-math/components/Add.js", "bar/deps/noflo-math/components/Add.js");
 require.alias("noflo-noflo-math/components/Ceil.js", "bar/deps/noflo-math/components/Ceil.js");
 require.alias("noflo-noflo-math/components/Subtract.js", "bar/deps/noflo-math/components/Subtract.js");
