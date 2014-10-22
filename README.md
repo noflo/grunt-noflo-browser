@@ -43,6 +43,12 @@ Default value: `false`
 
 Whether to build also the development dependencies.
 
+#### options.debug
+Type: `Boolean`
+Default value: `false`
+
+Whether to enable debugging using Flowhub over WebRTC.
+
 ### Usage Examples
 
 #### A typical browser build
