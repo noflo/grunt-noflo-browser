@@ -4,3 +4,4 @@ npm-debug.log
 /tmp2/
 /test/fixtures/components/*/
 /test/fixtures/graphs/*.js
+*~
