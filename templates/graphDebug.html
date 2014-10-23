@@ -19,10 +19,12 @@
             defaultGraph: graph,
             baseDir: graph.baseDir
         };
-        var rt = runtime(null, runtimeOptions);
-        console.log('WebRTC id is', rt.id);
+        var rt = runtime(null, runtimeOptions, true);
+        rt.signaller = '<%= signalServer %>';
+        rt.start();
         var ide = '<%= ideUrl %>';
-        var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.id);
+        var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.signaller+'#'+rt.id);
+        console.log('Debug URL', debugUrl);
         document.getElementById('flowhub_debug_url').href = debugUrl;
         rt.network.on('addnetwork', function () {
             console.log('<%= name %> is running!');

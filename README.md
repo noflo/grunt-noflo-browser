@@ -51,9 +51,15 @@ Whether to enable debugging using Flowhub over WebRTC.
 
 ### options.ide
 Type: `String`
-Default value: `http://app.flowhub.io`
+Default value: `https://app.flowhub.io`
 
 Which IDE instance to use for live-mode debugging url.
+
+### options.signalserver
+Type: `String`
+Default value: `https://api.flowhub.io`
+
+Which WebRTC signalling server to use for debugging.
 
 ### Usage Examples
 
