@@ -20,7 +20,6 @@
             baseDir: graph.baseDir
         };
         var rt = runtime(null, runtimeOptions);
-        window.rt = rt;
         console.log('WebRTC id is', rt.id);
         var ide = '<%= ideUrl %>';
         var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.id);
