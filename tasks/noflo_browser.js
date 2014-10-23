@@ -19,7 +19,7 @@ module.exports = function(grunt) {
       require: true,
       development: false,
       debug: false,
-      ide: 'http://app.flowhub.io',
+      ide: 'https://app.flowhub.io',
       concurrency: 10,
       plugins: [
         'component-json',
