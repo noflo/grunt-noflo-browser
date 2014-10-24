@@ -23,13 +23,17 @@
 
       noflo.graph.loadJSON(require('<%= graphPath %>'), function (graph) {
         graph.baseDir = '/<%= lib %>';
-        var runtimeOptions = {
-            defaultGraph: graph,
-            baseDir: graph.baseDir
-        };
 
         var queryProtocol = getParameterByName('fbp_protocol');
         var queryAddress = getParameterByName('fbp_address');
+        var queryNoLoad = getParameterByName('fbp_noload');
+
+        var runtimeOptions = {
+            baseDir: graph.baseDir
+        };
+        if (queryNoLoad.toLowerCase() !== 'true') {
+            runtimeOptions.defaultGraph = graph;
+        };
 
         var rt = null;
         if (queryProtocol == 'webrtc' && queryAddress) {
