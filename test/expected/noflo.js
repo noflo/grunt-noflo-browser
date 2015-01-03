@@ -398,7 +398,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   var
     nativeIsArray      = Array.isArray,
     nativeKeys         = Object.keys,
-    nativeBind         = FuncProto.bind;
+    nativeBind         = FuncProto.bind,
+    nativeCreate       = Object.create;
+
+  // Reusable constructor function for prototype setting.
+  var Ctor = function(){};
 
   // Create a safe reference to the Underscore object for use below.
   var _ = function(obj) {
@@ -456,7 +460,35 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return _.property(value);
   };
   _.iteratee = function(value, context) {
-    return cb(value, context);
+    return cb(value, context, Infinity);
+  };
+
+  // An internal function for creating assigner functions.
+  var createAssigner = function(keysFunc) {
+    return function(obj) {
+      var length = arguments.length;
+      if (length < 2 || obj == null) return obj;
+      for (var index = 0; index < length; index++) {
+        var source = arguments[index],
+            keys = keysFunc(source),
+            l = keys.length;
+        for (var i = 0; i < l; i++) {
+          var key = keys[i];
+          obj[key] = source[key];
+        }
+      }
+      return obj;
+    };
+  };
+
+  // An internal function for creating a new object that inherits from another.
+  var baseCreate = function(prototype) {
+    if (!_.isObject(prototype)) return {};
+    if (nativeCreate) return nativeCreate(prototype);
+    Ctor.prototype = prototype;
+    var result = new Ctor;
+    Ctor.prototype = null;
+    return result;
   };
 
   // Collection Functions
@@ -497,8 +529,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return results;
   };
 
-  var reduceError = 'Reduce of empty array with no initial value';
-
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`.
   _.reduce = _.foldl = _.inject = function(obj, iteratee, memo, context) {
@@ -508,7 +538,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         length = (keys || obj).length,
         index = 0, currentKey;
     if (arguments.length < 3) {
-      if (!length) throw new TypeError(reduceError);
       memo = obj[keys ? keys[index++] : index++];
     }
     for (; index < length; index++) {
@@ -526,27 +555,49 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         index = (keys || obj).length,
         currentKey;
     if (arguments.length < 3) {
-      if (!index) throw new TypeError(reduceError);
       memo = obj[keys ? keys[--index] : --index];
     }
-    while (index--) {
+    while (index-- > 0) {
       currentKey = keys ? keys[index] : index;
       memo = iteratee(memo, obj[currentKey], currentKey, obj);
     }
     return memo;
   };
 
+  // **Transform** is an alternative to reduce that transforms `obj` to a new
+  // `accumulator` object.
+  _.transform = function(obj, iteratee, accumulator, context) {
+    if (accumulator == null) {
+      if (_.isArray(obj)) {
+        accumulator = [];
+      } else if (_.isObject(obj)) {
+        var Ctor = obj.constructor;
+        accumulator = baseCreate(typeof Ctor == 'function' && Ctor.prototype);
+      } else {
+        accumulator = {};
+      }
+    }
+    if (obj == null) return accumulator;
+    iteratee = optimizeCb(iteratee, context, 4);
+    var keys = obj.length !== +obj.length && _.keys(obj),
+      length = (keys || obj).length,
+      index, currentKey;
+    for (index = 0; index < length; index++) {
+      currentKey = keys ? keys[index] : index;
+      if (iteratee(accumulator, obj[currentKey], currentKey, obj) === false) break;
+    }
+    return accumulator;
+  };
+
   // Return the first value which passes a truth test. Aliased as `detect`.
   _.find = _.detect = function(obj, predicate, context) {
-    var result;
-    predicate = cb(predicate, context);
-    _.some(obj, function(value, index, list) {
-      if (predicate(value, index, list)) {
-        result = value;
-        return true;
-      }
-    });
-    return result;
+    var key;
+    if (obj.length === +obj.length) {
+      key = _.findIndex(obj, predicate, context);
+    } else {
+      key = _.findKey(obj, predicate, context);
+    }
+    if (key !== void 0 && key !== -1) return obj[key];
   };
 
   // Return all the elements that pass a truth test.
@@ -597,11 +648,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Determine if the array or object contains a given value (using `===`).
-  // Aliased as `include`.
-  _.contains = _.include = function(obj, target) {
+  // Aliased as `includes` and `include`.
+  _.contains = _.includes = _.include = function(obj, target, fromIndex) {
     if (obj == null) return false;
     if (obj.length !== +obj.length) obj = _.values(obj);
-    return _.indexOf(obj, target) >= 0;
+    return _.indexOf(obj, target, typeof fromIndex == 'number' && fromIndex) >= 0;
   };
 
   // Invoke a method (with arguments) on every item in a collection.
@@ -715,13 +766,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         criteria: iteratee(value, index, list)
       };
     }).sort(function(left, right) {
-      var a = left.criteria;
-      var b = right.criteria;
-      if (a !== b) {
-        if (a > b || a === void 0) return 1;
-        if (a < b || b === void 0) return -1;
-      }
-      return left.index - right.index;
+      return _.comparator(left.criteria, right.criteria) || left.index - right.index;
     }), 'value');
   };
 
@@ -756,19 +801,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.countBy = group(function(result, value, key) {
     if (_.has(result, key)) result[key]++; else result[key] = 1;
   });
-
-  // Use a comparator function to figure out the smallest index at which
-  // an object should be inserted so as to maintain order. Uses binary search.
-  _.sortedIndex = function(array, obj, iteratee, context) {
-    iteratee = cb(iteratee, context, 1);
-    var value = iteratee(obj);
-    var low = 0, high = array.length;
-    while (low < high) {
-      var mid = low + high >>> 1;
-      if (iteratee(array[mid]) < value) low = mid + 1; else high = mid;
-    }
-    return low;
-  };
 
   // Safely create a real, live array from anything iterable.
   _.toArray = function(obj) {
@@ -971,7 +1003,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var i = 0, length = array && array.length;
     if (typeof isSorted == 'number') {
       i = isSorted < 0 ? Math.max(0, length + isSorted) : isSorted;
-    } else if (isSorted) {
+    } else if (isSorted && length) {
       i = _.sortedIndex(array, item);
       return array[i] === item ? i : -1;
     }
@@ -986,6 +1018,29 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     }
     while (--idx >= 0) if (array[idx] === item) return idx;
     return -1;
+  };
+
+  // Returns the first index on an array-like that passes a predicate test
+  _.findIndex = function(array, predicate, context) {
+    predicate = cb(predicate, context);
+    var length = array != null ? array.length : 0;
+    for (var i = 0; i < length; i++) {
+      if (predicate(array[i], i, array)) return i;
+    }
+    return -1;
+  };
+
+  // Use a comparator function to figure out the smallest index at which
+  // an object should be inserted so as to maintain order. Uses binary search.
+  _.sortedIndex = function(array, obj, iteratee, context) {
+    iteratee = cb(iteratee, context, 1);
+    var value = iteratee(obj);
+    var low = 0, high = array.length;
+    while (low < high) {
+      var mid = Math.floor((low + high) / 2);
+      if (_.comparator(iteratee(array[mid]), value) < 0) low = mid + 1; else high = mid;
+    }
+    return low;
   };
 
   // Generate an integer Array containing an arithmetic progression. A port of
@@ -1011,16 +1066,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Function (ahem) Functions
   // ------------------
 
-  // Reusable constructor function for prototype setting.
-  var Ctor = function(){};
-
   // Determines whether to execute a function as a constructor
   // or a normal function with the provided arguments
   var executeBound = function(sourceFunc, boundFunc, context, callingContext, args) {
     if (!(callingContext instanceof boundFunc)) return sourceFunc.apply(context, args);
-    Ctor.prototype = sourceFunc.prototype;
-    var self = new Ctor;
-    Ctor.prototype = null;
+    var self = baseCreate(sourceFunc.prototype);
     var result = sourceFunc.apply(self, args);
     if (_.isObject(result)) return result;
     return self;
@@ -1031,7 +1081,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // available.
   _.bind = function(func, context) {
     if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
-    if (!_.isFunction(func)) throw TypeError('Bind must be called on a function');
+    if (!_.isFunction(func)) throw new TypeError('Bind must be called on a function');
     var args = slice.call(arguments, 2);
     return function bound() {
       return executeBound(func, bound, context, this, args.concat(slice.call(arguments)));
@@ -1090,9 +1140,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Defers a function, scheduling it to run after the current call stack has
   // cleared.
-  _.defer = function(func) {
-    return _.delay.apply(_, [func, 1].concat(slice.call(arguments, 1)));
-  };
+  _.defer = _.partial(_.delay, _, 1);
 
   // Returns a function, that, when invoked, will only be triggered at most once
   // during a given window of time. Normally, the throttled function will run
@@ -1194,7 +1242,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   };
 
-  // Returns a function that will only be executed after being called N times.
+  // Returns a function that will only be executed on and after the Nth call.
   _.after = function(times, func) {
     return function() {
       if (--times < 1) {
@@ -1203,16 +1251,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   };
 
-  // Returns a function that will only be executed before being called N times.
+  // Returns a function that will only be executed up to (but not including) the Nth call.
   _.before = function(times, func) {
     var memo;
     return function() {
       if (--times > 0) {
         memo = func.apply(this, arguments);
       }
-      if (times <= 1) {
-        func = null;
-      }
+      if (times <= 1) func = null;
       return memo;
     };
   };
@@ -1225,26 +1271,42 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // ----------------
 
   // Keys in IE < 9 that won't be iterated by `for key in ...` and thus missed.
-  var hasEnumBug = !({toString: null}).propertyIsEnumerable('toString');
+  var hasEnumBug = !{toString: null}.propertyIsEnumerable('toString');
   var nonEnumerableProps = ['constructor', 'valueOf', 'isPrototypeOf', 'toString',
                       'propertyIsEnumerable', 'hasOwnProperty', 'toLocaleString'];
 
-  // Retrieve the names of an object's properties.
+  function collectNonEnumProps(obj, keys) {
+    var nonEnumIdx = nonEnumerableProps.length;
+    var proto = typeof obj.constructor === 'function' ? FuncProto : ObjProto;
+
+    while (nonEnumIdx--) {
+      var prop = nonEnumerableProps[nonEnumIdx];
+      if (prop === 'constructor' ? _.has(obj, prop) : prop in obj &&
+        obj[prop] !== proto[prop] && !_.contains(keys, prop)) {
+        keys.push(prop);
+      }
+    }
+  }
+
+  // Retrieve the names of an object's own properties.
   // Delegates to **ECMAScript 5**'s native `Object.keys`
   _.keys = function(obj) {
     if (!_.isObject(obj)) return [];
     if (nativeKeys) return nativeKeys(obj);
     var keys = [];
     for (var key in obj) if (_.has(obj, key)) keys.push(key);
-
     // Ahem, IE < 9.
-    if (hasEnumBug) {
-      var nonEnumIdx = nonEnumerableProps.length;
-      while (nonEnumIdx--) {
-        var prop = nonEnumerableProps[nonEnumIdx];
-        if (_.has(obj, prop) && !_.contains(keys, prop)) keys.push(prop);
-      }
-    }
+    if (hasEnumBug) collectNonEnumProps(obj, keys);
+    return keys;
+  };
+
+  // Retrieve all the property names of an object.
+  _.keysIn = function(obj) {
+    if (!_.isObject(obj)) return [];
+    var keys = [];
+    for (var key in obj) keys.push(key);
+    // Ahem, IE < 9.
+    if (hasEnumBug) collectNonEnumProps(obj, keys);
     return keys;
   };
 
@@ -1291,16 +1353,20 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Extend a given object with all the properties in passed-in object(s).
-  _.extend = function(obj) {
-    if (!_.isObject(obj)) return obj;
-    var source, prop;
-    for (var i = 1, length = arguments.length; i < length; i++) {
-      source = arguments[i];
-      for (prop in source) {
-        obj[prop] = source[prop];
-      }
+  _.extend = createAssigner(_.keysIn);
+
+  // Assigns a given object with all the own properties in the passed-in object(s)
+  // (https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
+  _.assign = createAssigner(_.keys);
+
+  // Returns the first key on an object that passes a predicate test
+  _.findKey = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var keys = _.keys(obj), key;
+    for (var i = 0, length = keys.length; i < length; i++) {
+      key = keys[i];
+      if (predicate(obj[key], key, obj)) return key;
     }
-    return obj;
   };
 
   // Return a copy of the object only containing the whitelisted properties.
@@ -1347,6 +1413,15 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       }
     }
     return obj;
+  };
+
+  // Creates an object that inherits from the given prototype object.
+  // If additional properties are provided then they will be added to the
+  // created object.
+  _.create = function(prototype, props) {
+    var result = baseCreate(prototype);
+    if (props) _.assign(result, props);
+    return result;
   };
 
   // Create a (shallow-cloned) duplicate of an object.
@@ -1423,36 +1498,32 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     // Add the first object to the stack of traversed objects.
     aStack.push(a);
     bStack.push(b);
-    var size, result;
+
     // Recursively compare objects and arrays.
     if (areArrays) {
       // Compare array lengths to determine if a deep comparison is necessary.
-      size = a.length;
-      result = size === b.length;
-      if (result) {
-        // Deep compare the contents, ignoring non-numeric properties.
-        while (size--) {
-          if (!(result = eq(a[size], b[size], aStack, bStack))) break;
-        }
+      length = a.length;
+      if (length !== b.length) return false;
+      // Deep compare the contents, ignoring non-numeric properties.
+      while (length--) {
+        if (!eq(a[length], b[length], aStack, bStack)) return false;
       }
     } else {
       // Deep compare objects.
       var keys = _.keys(a), key;
-      size = keys.length;
+      length = keys.length;
       // Ensure that both objects contain the same number of properties before comparing deep equality.
-      result = _.keys(b).length === size;
-      if (result) {
-        while (size--) {
-          // Deep compare each member
-          key = keys[size];
-          if (!(result = _.has(b, key) && eq(a[key], b[key], aStack, bStack))) break;
-        }
+      if (_.keys(b).length !== length) return false;
+      while (length--) {
+        // Deep compare each member
+        key = keys[length];
+        if (!(_.has(b, key) && eq(a[key], b[key], aStack, bStack))) return false;
       }
     }
     // Remove the first object from the stack of traversed objects.
     aStack.pop();
     bStack.pop();
-    return result;
+    return true;
   };
 
   // Perform a deep comparison to check if two objects are equal.
@@ -1501,8 +1572,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   }
 
-  // Optimize `isFunction` if appropriate. Work around an IE 11 bug.
-  if (typeof /./ !== 'function') {
+  // Optimize `isFunction` if appropriate. Work around an IE 11 bug (#1621).
+  // Work around a Safari 8 bug (#1929)
+  if (typeof /./ != 'function' && typeof Int8Array != 'object') {
     _.isFunction = function(obj) {
       return typeof obj == 'function' || false;
     };
@@ -1569,6 +1641,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   };
 
+  // Generates a function for a given object that returns a given property (including those of ancestors)
+  _.propertyOf = function(obj) {
+    return obj == null ? function(){} : function(key) {
+      return obj[key];
+    };
+  };
+
   // Returns a predicate for checking whether an object has a given set of `key:value` pairs.
   _.matches = function(attrs) {
     var pairs = _.pairs(attrs), length = pairs.length;
@@ -1581,6 +1660,18 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       }
       return true;
     };
+  };
+
+  // Default internal comparator for determining whether a is greater (1),
+  // equal (0) or less than (-1) some object b
+  _.comparator = function(a, b) {
+    if (a === b) return 0;
+    var isAComparable = a >= a, isBComparable = b >= b;
+    if (isAComparable || isBComparable) {
+      if (isAComparable && !isBComparable) return -1;
+      if (isBComparable && !isAComparable) return 1;
+    }
+    return a > b ? 1 : (b > a) ? -1 : 0;
   };
 
   // Run a function **n** times.
@@ -1638,9 +1729,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.result = function(object, property, fallback) {
     var value = object == null ? void 0 : object[property];
     if (value === void 0) {
-      return fallback;
+      value = fallback;
     }
-    return _.isFunction(value) ? object[property]() : value;
+    return _.isFunction(value) ? value.call(object) : value;
   };
 
   // Generate a unique integer id (unique within the entire client session).
@@ -3595,7 +3686,7 @@ module.exports = (function(){
 })();
 });
 require.register("noflo-noflo/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.9","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
+module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.10","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
 });
 require.register("noflo-noflo/src/lib/Graph.js", function(exports, require, module){
 var EventEmitter, Graph, clone, mergeResolveTheirsNaive, platform, resetGraph,
@@ -6863,6 +6954,7 @@ Network = (function(_super) {
     this.processes = {};
     this.connections = [];
     this.initials = [];
+    this.nextInitials = [];
     this.defaults = [];
     this.graph = graph;
     this.started = false;
@@ -7400,7 +7492,7 @@ Network = (function(_super) {
   };
 
   Network.prototype.addInitial = function(initializer, callback) {
-    var socket, to;
+    var init, socket, to;
     socket = internalSocket.createSocket();
     this.subscribeSocket(socket);
     to = this.getNode(initializer.to.node);
@@ -7420,17 +7512,22 @@ Network = (function(_super) {
     }
     this.connectPort(socket, to, initializer.to.port, initializer.to.index, true);
     this.connections.push(socket);
-    this.initials.push({
+    init = {
       socket: socket,
       data: initializer.from.data
-    });
+    };
+    this.initials.push(init);
+    this.nextInitials.push(init);
+    if (this.isStarted()) {
+      this.sendInitials();
+    }
     if (callback) {
       return callback();
     }
   };
 
   Network.prototype.removeInitial = function(initializer, callback) {
-    var connection, _i, _len, _ref;
+    var connection, init, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2;
     _ref = this.connections;
     for (_i = 0, _len = _ref.length; _i < _len; _i++) {
       connection = _ref[_i];
@@ -7442,6 +7539,28 @@ Network = (function(_super) {
       }
       connection.to.process.component.inPorts[connection.to.port].detach(connection);
       this.connections.splice(this.connections.indexOf(connection), 1);
+      _ref1 = this.initials;
+      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
+        init = _ref1[_j];
+        if (!init) {
+          continue;
+        }
+        if (init.socket !== connection) {
+          continue;
+        }
+        this.initials.splice(this.initials.indexOf(init), 1);
+      }
+      _ref2 = this.nextInitials;
+      for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
+        init = _ref2[_k];
+        if (!init) {
+          continue;
+        }
+        if (init.socket !== connection) {
+          continue;
+        }
+        this.nextInitials.splice(this.nextInitials.indexOf(init), 1);
+      }
     }
     if (callback) {
       return callback();
@@ -7478,6 +7597,13 @@ Network = (function(_super) {
     return this.started;
   };
 
+  Network.prototype.isRunning = function() {
+    if (!this.started) {
+      return false;
+    }
+    return this.connectionCount > 0;
+  };
+
   Network.prototype.startComponents = function() {
     var id, process, _ref, _results;
     _ref = this.processes;
@@ -7506,7 +7632,11 @@ Network = (function(_super) {
   };
 
   Network.prototype.start = function() {
+    if (this.started) {
+      this.stop();
+    }
     this.started = true;
+    this.initials = this.nextInitials.slice(0);
     this.startComponents();
     this.sendInitials();
     return this.sendDefaults();
@@ -8603,6 +8733,9 @@ exports.WirePattern = function(component, config, proc) {
     needPortGroups = collectGroups instanceof Array && collectGroups.indexOf(port) !== -1;
     return inPort.process = function(event, payload, index) {
       var data, foundGroup, g, groupLength, groups, grp, i, key, obj, out, outs, postpone, postponedToQ, reqId, requiredLength, resume, task, tmp, whenDone, whenDoneGroups, _len5, _len6, _len7, _len8, _n, _o, _p, _q, _r, _ref2, _ref3, _ref4, _s;
+      if (!component.groupBuffers[port]) {
+        component.groupBuffers[port] = [];
+      }
       switch (event) {
         case 'begingroup':
           component.groupBuffers[port].push(payload);
@@ -8781,6 +8914,9 @@ exports.WirePattern = function(component, config, proc) {
           }
           if (outPorts.length === 1) {
             outs = outs[outPorts[0]];
+          }
+          if (!groups) {
+            groups = [];
           }
           whenDoneGroups = groups.slice(0);
           whenDone = function(err) {
@@ -9416,13 +9552,7 @@ Graph = (function(_super) {
       this.network.graph.checkTransactionEnd();
       return exported["public"];
     }
-    if (Object.keys(this.network.graph.inports).length > 0) {
-      return false;
-    }
-    if (port.isAttached()) {
-      return false;
-    }
-    return (nodeName + '.' + portName).toLowerCase();
+    return false;
   };
 
   Graph.prototype.isExportedOutport = function(port, nodeName, portName) {
@@ -9447,13 +9577,7 @@ Graph = (function(_super) {
       this.network.graph.checkTransactionEnd();
       return exported["public"];
     }
-    if (Object.keys(this.network.graph.outports).length > 0) {
-      return false;
-    }
-    if (port.isAttached()) {
-      return false;
-    }
-    return (nodeName + '.' + portName).toLowerCase();
+    return false;
   };
 
   Graph.prototype.setToReady = function() {
@@ -11488,7 +11612,7 @@ require.register("noflo-noflo-css/index.js", function(exports, require, module){
 
 });
 require.register("noflo-noflo-css/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-css","description":"Cascading Style Sheets components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-css","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/MoveElement.js","components/RotateElement.js","components/SetElementTop.js","index.js"],"json":["component.json"],"noflo":{"icon":"css3","components":{"MoveElement":"components/MoveElement.js","RotateElement":"components/RotateElement.js","SetElementTop":"components/SetElementTop.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-css","description":"Cascading Style Sheets components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-css","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/MoveElement.js","components/ResizeElement.js","components/RotateElement.js","components/SetElementTop.js","index.js","components/SetBackgroundImage.js"],"json":["component.json"],"noflo":{"icon":"css3","components":{"MoveElement":"components/MoveElement.js","ResizeElement":"components/ResizeElement.js","RotateElement":"components/RotateElement.js","SetBackgroundImage":"components/SetBackgroundImage.js","SetElementTop":"components/SetElementTop.js"}}}');
 });
 require.register("noflo-noflo-css/components/MoveElement.js", function(exports, require, module){
 var MoveElement, noflo,
@@ -11552,6 +11676,65 @@ MoveElement = (function(_super) {
 
 exports.getComponent = function() {
   return new MoveElement;
+};
+
+});
+require.register("noflo-noflo-css/components/ResizeElement.js", function(exports, require, module){
+var ResizeElement, noflo,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+noflo = require('noflo');
+
+ResizeElement = (function(_super) {
+  __extends(ResizeElement, _super);
+
+  ResizeElement.prototype.description = 'Change the size of a DOM element';
+
+  ResizeElement.prototype.icon = 'arrows';
+
+  function ResizeElement() {
+    this.element = null;
+    this.inPorts = {
+      element: new noflo.Port('object'),
+      size: new noflo.Port('object'),
+      width: new noflo.Port('number'),
+      height: new noflo.Port('number')
+    };
+    this.inPorts.element.on('data', (function(_this) {
+      return function(element) {
+        return _this.element = element;
+      };
+    })(this));
+    this.inPorts.size.on('data', (function(_this) {
+      return function(size) {
+        _this.setPosition('width', "" + size.width + "px");
+        return _this.setPosition('height', "" + size.height + "px");
+      };
+    })(this));
+    this.inPorts.width.on('data', (function(_this) {
+      return function(width) {
+        return _this.setPosition('width', "" + width + "px");
+      };
+    })(this));
+    this.inPorts.height.on('data', (function(_this) {
+      return function(height) {
+        return _this.setPosition('height', "" + height + "px");
+      };
+    })(this));
+  }
+
+  ResizeElement.prototype.setPosition = function(attr, value) {
+    this.element.style.position = 'absolute';
+    return this.element.style[attr] = value;
+  };
+
+  return ResizeElement;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new ResizeElement;
 };
 
 });
@@ -11673,6 +11856,50 @@ SetElementTop = (function(_super) {
 
 exports.getComponent = function() {
   return new SetElementTop;
+};
+
+});
+require.register("noflo-noflo-css/components/SetBackgroundImage.js", function(exports, require, module){
+var SetBackgroundImage, noflo,
+  __hasProp = {}.hasOwnProperty,
+  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+
+noflo = require('noflo');
+
+SetBackgroundImage = (function(_super) {
+  __extends(SetBackgroundImage, _super);
+
+  SetBackgroundImage.prototype.description = 'Set element\'s CSS background image';
+
+  SetBackgroundImage.prototype.icon = 'picture';
+
+  function SetBackgroundImage() {
+    this.element = null;
+    this.inPorts = {
+      element: new noflo.Port('object'),
+      imagedata: new noflo.Port('string')
+    };
+    this.inPorts.element.on('data', (function(_this) {
+      return function(element) {
+        return _this.element = element;
+      };
+    })(this));
+    this.inPorts.imagedata.on('data', (function(_this) {
+      return function(imagedata) {
+        if (!_this.element) {
+          return;
+        }
+        return _this.element.style.background = 'url(' + imagedata + ') no-repeat center';
+      };
+    })(this));
+  }
+
+  return SetBackgroundImage;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new SetBackgroundImage;
 };
 
 });
@@ -12020,7 +12247,7 @@ require.register("noflo-noflo-objects/index.js", function(exports, require, modu
 
 });
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*","mrluc/owl-deepcopy":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js","components/FilterProperty.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterProperty":"components/FilterProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*","mrluc/owl-deepcopy":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js","components/FilterProperty.js","components/CreateError.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateError":"components/CreateError.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterProperty":"components/FilterProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
 });
 require.register("noflo-noflo-objects/components/Extend.js", function(exports, require, module){
 var Extend, noflo, _,
@@ -14571,6 +14798,40 @@ exports.getComponent = function() {
 };
 
 });
+require.register("noflo-noflo-objects/components/CreateError.js", function(exports, require, module){
+var noflo;
+
+noflo = require('noflo');
+
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.icon = 'bug';
+  c.description = 'Create an Error object';
+  c.inPorts.add('start', {
+    datatype: 'string'
+  });
+  c.outPorts.add('out', {
+    datatype: 'object'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": 'start',
+    out: 'out',
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var err;
+    if (typeof data === 'string') {
+      err = new Error(data);
+    } else {
+      err = new Error('Error');
+      err.context = data;
+    }
+    return out.send(err);
+  });
+  return c;
+};
+
+});
 require.register("noflo-noflo-math/index.js", function(exports, require, module){
 /*
  * This file can be used for general library features of noflo-math.
@@ -15334,7 +15595,7 @@ require.register("bar/graphs/SendJson.fbp", function(exports, require, module){
 module.exports = JSON.parse('{"processes":{"SendString":{"component":"strings/SendString"},"ParseJson":{"component":"strings/ParseJson"}},"connections":[{"src":{"process":"SendString","port":"out"},"tgt":{"process":"ParseJson","port":"in"}}],"exports":[{"private":"sendstring.string","public":"json"},{"private":"sendstring.in","public":"in"},{"private":"parsejson.out","public":"out"}]}');
 });
 require.register("bar/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.1.3","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"}},"fbp":["graphs/SendJson.fbp"]}');
+module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.1.9","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"}},"fbp":["graphs/SendJson.fbp"]}');
 });
 require.register("bar/graphs/InputExample.json", function(exports, require, module){
 module.exports = JSON.parse('{"properties":{"name":"InputExample","id":"InputExample","project":"on6d1","environment":{"type":"noflo-browser","content":"<input type=\\"text\\" id=\\"search\\" placeholder=\\"Type your query...\\">\\n<button id=\\"submit\\">Search</button>\\n<ul id=\\"results\\">\\n</ul>"}},"inports":{},"outports":{},"groups":[{"name":"Search Input","nodes":["core/Drop_oui72","core/Drop_xk1k4","core/Kick_6bw8b","dom/GetElement_qqzyh","dom/GetElement_ty501","interaction/ListenKeyboard_aioza","interaction/ListenMouse_jbbnx","math/Compare_5actd","objects/GetObjectKey_h51o8","websocket/SendMessage_bzizd"],"metadata":{"description":""}},{"name":"Write results","nodes":["core/Drop_u2w51","dom/CreateElement_x5wvz","dom/GetElement_isxye","dom/WriteHtml_q01ls","strings/SendString_1nixz","strings/SendString_r4bef","websocket/ListenMessages_nffhn"],"metadata":{"description":""}}],"processes":{"dom/GetElement_qqzyh":{"component":"dom/GetElement","metadata":{"label":"GetInput","x":180,"y":180}},"core/Drop_xk1k4":{"component":"core/Drop","metadata":{"label":"core/Drop","x":360,"y":360}},"interaction/ListenKeyboard_aioza":{"component":"interaction/ListenKeyboard","metadata":{"label":"ListenInput","x":360,"y":216}},"websocket/Connect_tfgce":{"component":"websocket/Connect","metadata":{"label":"websocket/Connect","x":756,"y":-216}},"websocket/SendMessage_bzizd":{"component":"websocket/SendMessage","metadata":{"label":"SendSearch","x":900,"y":108}},"core/Drop_46l31":{"component":"core/Drop","metadata":{"label":"core/Drop","x":756,"y":-108}},"objects/GetObjectKey_h51o8":{"component":"objects/GetObjectKey","metadata":{"label":"GetValue","x":756,"y":108}},"core/Kick_6bw8b":{"component":"core/Kick","metadata":{"label":"SendInput","x":612,"y":108}},"websocket/ListenMessages_nffhn":{"component":"websocket/ListenMessages","metadata":{"label":"ListenResults","x":936,"y":-396}},"dom/WriteHtml_q01ls":{"component":"dom/WriteHtml","metadata":{"label":"WriteResult","x":1440,"y":-396}},"dom/CreateElement_x5wvz":{"component":"dom/CreateElement","metadata":{"label":"CreateElement","x":1188,"y":-324}},"dom/GetElement_isxye":{"component":"dom/GetElement","metadata":{"label":"GetContainer","x":1080,"y":-180}},"strings/SendString_r4bef":{"component":"strings/SendString","metadata":{"label":"StartCreate","x":1080,"y":-324}},"core/Drop_u2w51":{"component":"core/Drop","metadata":{"label":"core/Drop","x":1260,"y":-180}},"math/Compare_5actd":{"component":"math/Compare","metadata":{"label":"FindEnter","x":504,"y":216}},"core/Drop_oui72":{"component":"core/Drop","metadata":{"label":"IgnoreOtherKeys","x":612,"y":360}},"dom/GetElement_ty501":{"component":"dom/GetElement","metadata":{"label":"GetButton","x":180,"y":36}},"interaction/ListenMouse_jbbnx":{"component":"interaction/ListenMouse","metadata":{"label":"ListenClick","x":360,"y":36}},"strings/SendString_1nixz":{"component":"strings/SendString","metadata":{"label":"WaitForElement","x":1296,"y":-432}}},"connections":[{"src":{"process":"dom/GetElement_qqzyh","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"interaction/ListenKeyboard_aioza","port":"element"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"connection"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"error"},"tgt":{"process":"core/Drop_46l31","port":"in"},"metadata":{"route":1}},{"src":{"process":"objects/GetObjectKey_h51o8","port":"out"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"string"},"metadata":{}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"core/Kick_6bw8b","port":"data"},"metadata":{"route":0}},{"src":{"process":"core/Kick_6bw8b","port":"out"},"tgt":{"process":"objects/GetObjectKey_h51o8","port":"in"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/ListenMessages_nffhn","port":"connection"},"metadata":{"route":0}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"container"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_r4bef","port":"out"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"tagname"},"metadata":{"route":4}},{"src":{"process":"dom/GetElement_isxye","port":"element"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"container"},"metadata":{"route":6}},{"src":{"process":"dom/GetElement_isxye","port":"error"},"tgt":{"process":"core/Drop_u2w51","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenKeyboard_aioza","port":"keypress"},"tgt":{"process":"math/Compare_5actd","port":"value"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"pass"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"fail"},"tgt":{"process":"core/Drop_oui72","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_ty501","port":"element"},"tgt":{"process":"interaction/ListenMouse_jbbnx","port":"element"},"metadata":{}},{"src":{"process":"dom/GetElement_ty501","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenMouse_jbbnx","port":"click"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"strings/SendString_1nixz","port":"in"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_1nixz","port":"out"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"html"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_r4bef","port":"in"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_1nixz","port":"string"},"metadata":{"route":7}},{"data":"#search","tgt":{"process":"dom/GetElement_qqzyh","port":"selector"}},{"data":"search","tgt":{"process":"websocket/Connect_tfgce","port":"protocol"}},{"data":"ws://127.0.0.1:8000","tgt":{"process":"websocket/Connect_tfgce","port":"url"}},{"data":"value","tgt":{"process":"objects/GetObjectKey_h51o8","port":"key"}},{"data":"li","tgt":{"process":"strings/SendString_r4bef","port":"string"}},{"data":"#results","tgt":{"process":"dom/GetElement_isxye","port":"selector"}},{"data":13,"tgt":{"process":"math/Compare_5actd","port":"comparison"}},{"data":"==","tgt":{"process":"math/Compare_5actd","port":"operator"}},{"data":"#submit","tgt":{"process":"dom/GetElement_ty501","port":"selector"}}]}');
@@ -15358,7 +15619,7 @@ module.exports = {
     "flow"
   ],
   "repo": "noflo/noflo",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "dependencies": {
     "bergie/emitter": "*",
     "jashkenas/underscore": "*",
@@ -15539,9 +15800,11 @@ module.exports = {
   },
   "scripts": [
     "components/MoveElement.js",
+    "components/ResizeElement.js",
     "components/RotateElement.js",
     "components/SetElementTop.js",
-    "index.js"
+    "index.js",
+    "components/SetBackgroundImage.js"
   ],
   "json": [
     "component.json"
@@ -15550,7 +15813,9 @@ module.exports = {
     "icon": "css3",
     "components": {
       "MoveElement": "components/MoveElement.js",
+      "ResizeElement": "components/ResizeElement.js",
       "RotateElement": "components/RotateElement.js",
+      "SetBackgroundImage": "components/SetBackgroundImage.js",
       "SetElementTop": "components/SetElementTop.js"
     }
   }
@@ -15619,7 +15884,8 @@ module.exports = {
     "components/CallMethod.js",
     "index.js",
     "components/GetCurrentTimestamp.js",
-    "components/FilterProperty.js"
+    "components/FilterProperty.js",
+    "components/CreateError.js"
   ],
   "json": [
     "component.json"
@@ -15629,6 +15895,7 @@ module.exports = {
     "components": {
       "CallMethod": "components/CallMethod.js",
       "CreateDate": "components/CreateDate.js",
+      "CreateError": "components/CreateError.js",
       "CreateObject": "components/CreateObject.js",
       "DuplicateProperty": "components/DuplicateProperty.js",
       "Extend": "components/Extend.js",
@@ -15847,9 +16114,11 @@ require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-core/deps/under
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-core/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
 require.alias("noflo-noflo-css/components/MoveElement.js", "bar/deps/noflo-css/components/MoveElement.js");
+require.alias("noflo-noflo-css/components/ResizeElement.js", "bar/deps/noflo-css/components/ResizeElement.js");
 require.alias("noflo-noflo-css/components/RotateElement.js", "bar/deps/noflo-css/components/RotateElement.js");
 require.alias("noflo-noflo-css/components/SetElementTop.js", "bar/deps/noflo-css/components/SetElementTop.js");
 require.alias("noflo-noflo-css/index.js", "bar/deps/noflo-css/index.js");
+require.alias("noflo-noflo-css/components/SetBackgroundImage.js", "bar/deps/noflo-css/components/SetBackgroundImage.js");
 require.alias("noflo-noflo-css/index.js", "noflo-css/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-css/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-css/deps/noflo/src/lib/InternalSocket.js");
@@ -15910,6 +16179,7 @@ require.alias("noflo-noflo-objects/components/CallMethod.js", "bar/deps/noflo-ob
 require.alias("noflo-noflo-objects/index.js", "bar/deps/noflo-objects/index.js");
 require.alias("noflo-noflo-objects/components/GetCurrentTimestamp.js", "bar/deps/noflo-objects/components/GetCurrentTimestamp.js");
 require.alias("noflo-noflo-objects/components/FilterProperty.js", "bar/deps/noflo-objects/components/FilterProperty.js");
+require.alias("noflo-noflo-objects/components/CreateError.js", "bar/deps/noflo-objects/components/CreateError.js");
 require.alias("noflo-noflo-objects/index.js", "noflo-objects/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-objects/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-objects/deps/noflo/src/lib/InternalSocket.js");
