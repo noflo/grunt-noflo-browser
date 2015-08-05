@@ -28,7 +28,8 @@ module.exports = function(grunt) {
         'component-fbp'
       ],
       remotes: [],
-      graph_scripts: []
+      graph_scripts: [],
+      heads: []
     });
 
     // Force task to async mode
@@ -62,7 +63,8 @@ module.exports = function(grunt) {
             signalServer: options.signalserver,
             noflo: destPath,
             graphPath: manifest.name + '/' + manifest.noflo.graphs[graphName],
-            content: graph.properties.environment.content
+            content: graph.properties.environment.content,
+            heads: options.heads
           }
         });
         var demoFile = path.resolve(destDir, graphName + '.html');
