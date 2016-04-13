@@ -367,9 +367,9 @@ Emitter.prototype.hasListeners = function(event){
 
 });
 require.register("jashkenas-underscore/underscore.js", function(exports, require, module){
-//     Underscore.js 1.7.0
+//     Underscore.js 1.8.3
 //     http://underscorejs.org
-//     (c) 2009-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
+//     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
 //     Underscore may be freely distributed under the MIT license.
 
 (function() {
@@ -401,7 +401,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     nativeBind         = FuncProto.bind,
     nativeCreate       = Object.create;
 
-  // Reusable constructor function for prototype setting.
+  // Naked function reference for surrogate-prototype-swapping.
   var Ctor = function(){};
 
   // Create a safe reference to the Underscore object for use below.
@@ -424,7 +424,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   }
 
   // Current version.
-  _.VERSION = '1.7.0';
+  _.VERSION = '1.8.3';
 
   // Internal function that returns an efficient (for current engines) version
   // of the passed-in callback, to be repeatedly applied in other Underscore
@@ -456,7 +456,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   var cb = function(value, context, argCount) {
     if (value == null) return _.identity;
     if (_.isFunction(value)) return optimizeCb(value, context, argCount);
-    if (_.isObject(value)) return _.matches(value);
+    if (_.isObject(value)) return _.matcher(value);
     return _.property(value);
   };
   _.iteratee = function(value, context) {
@@ -464,17 +464,17 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // An internal function for creating assigner functions.
-  var createAssigner = function(keysFunc) {
+  var createAssigner = function(keysFunc, undefinedOnly) {
     return function(obj) {
       var length = arguments.length;
       if (length < 2 || obj == null) return obj;
-      for (var index = 0; index < length; index++) {
+      for (var index = 1; index < length; index++) {
         var source = arguments[index],
             keys = keysFunc(source),
             l = keys.length;
         for (var i = 0; i < l; i++) {
           var key = keys[i];
-          obj[key] = source[key];
+          if (!undefinedOnly || obj[key] === void 0) obj[key] = source[key];
         }
       }
       return obj;
@@ -491,6 +491,23 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return result;
   };
 
+  var property = function(key) {
+    return function(obj) {
+      return obj == null ? void 0 : obj[key];
+    };
+  };
+
+  // Helper for collection methods to determine whether a collection
+  // should be iterated as an array or as an object
+  // Related: http://people.mozilla.org/~jorendorff/es6-draft.html#sec-tolength
+  // Avoids a very nasty iOS 8 JIT bug on ARM-64. #2094
+  var MAX_ARRAY_INDEX = Math.pow(2, 53) - 1;
+  var getLength = property('length');
+  var isArrayLike = function(collection) {
+    var length = getLength(collection);
+    return typeof length == 'number' && length >= 0 && length <= MAX_ARRAY_INDEX;
+  };
+
   // Collection Functions
   // --------------------
 
@@ -498,11 +515,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Handles raw objects in addition to array-likes. Treats all
   // sparse array-likes as if they were dense.
   _.each = _.forEach = function(obj, iteratee, context) {
-    if (obj == null) return obj;
     iteratee = optimizeCb(iteratee, context);
-    var i, length = obj.length;
-    if (length === +length) {
-      for (i = 0; i < length; i++) {
+    var i, length;
+    if (isArrayLike(obj)) {
+      for (i = 0, length = obj.length; i < length; i++) {
         iteratee(obj[i], i, obj);
       }
     } else {
@@ -516,83 +532,54 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Return the results of applying the iteratee to each element.
   _.map = _.collect = function(obj, iteratee, context) {
-    if (obj == null) return [];
     iteratee = cb(iteratee, context);
-    var keys = obj.length !== +obj.length && _.keys(obj),
+    var keys = !isArrayLike(obj) && _.keys(obj),
         length = (keys || obj).length,
-        results = Array(length),
-        currentKey;
+        results = Array(length);
     for (var index = 0; index < length; index++) {
-      currentKey = keys ? keys[index] : index;
+      var currentKey = keys ? keys[index] : index;
       results[index] = iteratee(obj[currentKey], currentKey, obj);
     }
     return results;
   };
 
+  // Create a reducing function iterating left or right.
+  function createReduce(dir) {
+    // Optimized iterator function as using arguments.length
+    // in the main function will deoptimize the, see #1991.
+    function iterator(obj, iteratee, memo, keys, index, length) {
+      for (; index >= 0 && index < length; index += dir) {
+        var currentKey = keys ? keys[index] : index;
+        memo = iteratee(memo, obj[currentKey], currentKey, obj);
+      }
+      return memo;
+    }
+
+    return function(obj, iteratee, memo, context) {
+      iteratee = optimizeCb(iteratee, context, 4);
+      var keys = !isArrayLike(obj) && _.keys(obj),
+          length = (keys || obj).length,
+          index = dir > 0 ? 0 : length - 1;
+      // Determine the initial value if none is provided.
+      if (arguments.length < 3) {
+        memo = obj[keys ? keys[index] : index];
+        index += dir;
+      }
+      return iterator(obj, iteratee, memo, keys, index, length);
+    };
+  }
+
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`.
-  _.reduce = _.foldl = _.inject = function(obj, iteratee, memo, context) {
-    if (obj == null) obj = [];
-    iteratee = optimizeCb(iteratee, context, 4);
-    var keys = obj.length !== +obj.length && _.keys(obj),
-        length = (keys || obj).length,
-        index = 0, currentKey;
-    if (arguments.length < 3) {
-      memo = obj[keys ? keys[index++] : index++];
-    }
-    for (; index < length; index++) {
-      currentKey = keys ? keys[index] : index;
-      memo = iteratee(memo, obj[currentKey], currentKey, obj);
-    }
-    return memo;
-  };
+  _.reduce = _.foldl = _.inject = createReduce(1);
 
   // The right-associative version of reduce, also known as `foldr`.
-  _.reduceRight = _.foldr = function(obj, iteratee, memo, context) {
-    if (obj == null) obj = [];
-    iteratee = optimizeCb(iteratee, context, 4);
-    var keys = obj.length !== + obj.length && _.keys(obj),
-        index = (keys || obj).length,
-        currentKey;
-    if (arguments.length < 3) {
-      memo = obj[keys ? keys[--index] : --index];
-    }
-    while (index-- > 0) {
-      currentKey = keys ? keys[index] : index;
-      memo = iteratee(memo, obj[currentKey], currentKey, obj);
-    }
-    return memo;
-  };
-
-  // **Transform** is an alternative to reduce that transforms `obj` to a new
-  // `accumulator` object.
-  _.transform = function(obj, iteratee, accumulator, context) {
-    if (accumulator == null) {
-      if (_.isArray(obj)) {
-        accumulator = [];
-      } else if (_.isObject(obj)) {
-        var Ctor = obj.constructor;
-        accumulator = baseCreate(typeof Ctor == 'function' && Ctor.prototype);
-      } else {
-        accumulator = {};
-      }
-    }
-    if (obj == null) return accumulator;
-    iteratee = optimizeCb(iteratee, context, 4);
-    var keys = obj.length !== +obj.length && _.keys(obj),
-      length = (keys || obj).length,
-      index, currentKey;
-    for (index = 0; index < length; index++) {
-      currentKey = keys ? keys[index] : index;
-      if (iteratee(accumulator, obj[currentKey], currentKey, obj) === false) break;
-    }
-    return accumulator;
-  };
+  _.reduceRight = _.foldr = createReduce(-1);
 
   // Return the first value which passes a truth test. Aliased as `detect`.
   _.find = _.detect = function(obj, predicate, context) {
     var key;
-    if (obj.length === +obj.length) {
+    if (isArrayLike(obj)) {
       key = _.findIndex(obj, predicate, context);
     } else {
       key = _.findKey(obj, predicate, context);
@@ -604,7 +591,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Aliased as `select`.
   _.filter = _.select = function(obj, predicate, context) {
     var results = [];
-    if (obj == null) return results;
     predicate = cb(predicate, context);
     _.each(obj, function(value, index, list) {
       if (predicate(value, index, list)) results.push(value);
@@ -620,13 +606,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Determine whether all of the elements match a truth test.
   // Aliased as `all`.
   _.every = _.all = function(obj, predicate, context) {
-    if (obj == null) return true;
     predicate = cb(predicate, context);
-    var keys = obj.length !== +obj.length && _.keys(obj),
-        length = (keys || obj).length,
-        index, currentKey;
-    for (index = 0; index < length; index++) {
-      currentKey = keys ? keys[index] : index;
+    var keys = !isArrayLike(obj) && _.keys(obj),
+        length = (keys || obj).length;
+    for (var index = 0; index < length; index++) {
+      var currentKey = keys ? keys[index] : index;
       if (!predicate(obj[currentKey], currentKey, obj)) return false;
     }
     return true;
@@ -635,24 +619,22 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Determine if at least one element in the object matches a truth test.
   // Aliased as `any`.
   _.some = _.any = function(obj, predicate, context) {
-    if (obj == null) return false;
     predicate = cb(predicate, context);
-    var keys = obj.length !== +obj.length && _.keys(obj),
-        length = (keys || obj).length,
-        index, currentKey;
-    for (index = 0; index < length; index++) {
-      currentKey = keys ? keys[index] : index;
+    var keys = !isArrayLike(obj) && _.keys(obj),
+        length = (keys || obj).length;
+    for (var index = 0; index < length; index++) {
+      var currentKey = keys ? keys[index] : index;
       if (predicate(obj[currentKey], currentKey, obj)) return true;
     }
     return false;
   };
 
-  // Determine if the array or object contains a given value (using `===`).
+  // Determine if the array or object contains a given item (using `===`).
   // Aliased as `includes` and `include`.
-  _.contains = _.includes = _.include = function(obj, target, fromIndex) {
-    if (obj == null) return false;
-    if (obj.length !== +obj.length) obj = _.values(obj);
-    return _.indexOf(obj, target, typeof fromIndex == 'number' && fromIndex) >= 0;
+  _.contains = _.includes = _.include = function(obj, item, fromIndex, guard) {
+    if (!isArrayLike(obj)) obj = _.values(obj);
+    if (typeof fromIndex != 'number' || guard) fromIndex = 0;
+    return _.indexOf(obj, item, fromIndex) >= 0;
   };
 
   // Invoke a method (with arguments) on every item in a collection.
@@ -660,7 +642,8 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var args = slice.call(arguments, 2);
     var isFunc = _.isFunction(method);
     return _.map(obj, function(value) {
-      return (isFunc ? method : value[method]).apply(value, args);
+      var func = isFunc ? method : value[method];
+      return func == null ? func : func.apply(value, args);
     });
   };
 
@@ -672,13 +655,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Convenience version of a common use case of `filter`: selecting only objects
   // containing specific `key:value` pairs.
   _.where = function(obj, attrs) {
-    return _.filter(obj, _.matches(attrs));
+    return _.filter(obj, _.matcher(attrs));
   };
 
   // Convenience version of a common use case of `find`: getting the first object
   // containing specific `key:value` pairs.
   _.findWhere = function(obj, attrs) {
-    return _.find(obj, _.matches(attrs));
+    return _.find(obj, _.matcher(attrs));
   };
 
   // Return the maximum element (or element-based computation).
@@ -686,7 +669,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var result = -Infinity, lastComputed = -Infinity,
         value, computed;
     if (iteratee == null && obj != null) {
-      obj = obj.length === +obj.length ? obj : _.values(obj);
+      obj = isArrayLike(obj) ? obj : _.values(obj);
       for (var i = 0, length = obj.length; i < length; i++) {
         value = obj[i];
         if (value > result) {
@@ -711,7 +694,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     var result = Infinity, lastComputed = Infinity,
         value, computed;
     if (iteratee == null && obj != null) {
-      obj = obj.length === +obj.length ? obj : _.values(obj);
+      obj = isArrayLike(obj) ? obj : _.values(obj);
       for (var i = 0, length = obj.length; i < length; i++) {
         value = obj[i];
         if (value < result) {
@@ -734,7 +717,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Shuffle a collection, using the modern version of the
   // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
   _.shuffle = function(obj) {
-    var set = obj && obj.length === +obj.length ? obj : _.values(obj);
+    var set = isArrayLike(obj) ? obj : _.values(obj);
     var length = set.length;
     var shuffled = Array(length);
     for (var index = 0, rand; index < length; index++) {
@@ -750,7 +733,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // The internal `guard` argument allows it to work with `map`.
   _.sample = function(obj, n, guard) {
     if (n == null || guard) {
-      if (obj.length !== +obj.length) obj = _.values(obj);
+      if (!isArrayLike(obj)) obj = _.values(obj);
       return obj[_.random(obj.length - 1)];
     }
     return _.shuffle(obj).slice(0, Math.max(0, n));
@@ -766,7 +749,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
         criteria: iteratee(value, index, list)
       };
     }).sort(function(left, right) {
-      return _.comparator(left.criteria, right.criteria) || left.index - right.index;
+      var a = left.criteria;
+      var b = right.criteria;
+      if (a !== b) {
+        if (a > b || a === void 0) return 1;
+        if (a < b || b === void 0) return -1;
+      }
+      return left.index - right.index;
     }), 'value');
   };
 
@@ -806,14 +795,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   _.toArray = function(obj) {
     if (!obj) return [];
     if (_.isArray(obj)) return slice.call(obj);
-    if (obj.length === +obj.length) return _.map(obj, _.identity);
+    if (isArrayLike(obj)) return _.map(obj, _.identity);
     return _.values(obj);
   };
 
   // Return the number of elements in an object.
   _.size = function(obj) {
     if (obj == null) return 0;
-    return obj.length === +obj.length ? obj.length : _.keys(obj).length;
+    return isArrayLike(obj) ? obj.length : _.keys(obj).length;
   };
 
   // Split a collection into two arrays: one whose elements all satisfy the given
@@ -841,14 +830,13 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Returns everything but the last entry of the array. Especially useful on
   // the arguments object. Passing **n** will return all the values in
-  // the array, excluding the last N. The **guard** check allows it to work with
-  // `_.map`.
+  // the array, excluding the last N.
   _.initial = function(array, n, guard) {
     return slice.call(array, 0, Math.max(0, array.length - (n == null || guard ? 1 : n)));
   };
 
   // Get the last element of an array. Passing **n** will return the last N
-  // values in the array. The **guard** check allows it to work with `_.map`.
+  // values in the array.
   _.last = function(array, n, guard) {
     if (array == null) return void 0;
     if (n == null || guard) return array[array.length - 1];
@@ -857,8 +845,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
   // Especially useful on the arguments object. Passing an **n** will return
-  // the rest N values in the array. The **guard**
-  // check allows it to work with `_.map`.
+  // the rest N values in the array.
   _.rest = _.tail = _.drop = function(array, n, guard) {
     return slice.call(array, n == null || guard ? 1 : n);
   };
@@ -870,10 +857,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Internal implementation of a recursive `flatten` function.
   var flatten = function(input, shallow, strict, startIndex) {
-    var output = [], idx = 0, value;
-    for (var i = startIndex || 0, length = input && input.length; i < length; i++) {
-      value = input[i];
-      if (value && value.length >= 0 && (_.isArray(value) || _.isArguments(value))) {
+    var output = [], idx = 0;
+    for (var i = startIndex || 0, length = getLength(input); i < length; i++) {
+      var value = input[i];
+      if (isArrayLike(value) && (_.isArray(value) || _.isArguments(value))) {
         //flatten current level of array or arguments object
         if (!shallow) value = flatten(value, shallow, strict);
         var j = 0, len = value.length;
@@ -902,7 +889,6 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // been sorted, you have the option of using a faster algorithm.
   // Aliased as `unique`.
   _.uniq = _.unique = function(array, isSorted, iteratee, context) {
-    if (array == null) return [];
     if (!_.isBoolean(isSorted)) {
       context = iteratee;
       iteratee = isSorted;
@@ -911,7 +897,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     if (iteratee != null) iteratee = cb(iteratee, context);
     var result = [];
     var seen = [];
-    for (var i = 0, length = array.length; i < length; i++) {
+    for (var i = 0, length = getLength(array); i < length; i++) {
       var value = array[i],
           computed = iteratee ? iteratee(value, i, array) : value;
       if (isSorted) {
@@ -938,10 +924,9 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // Produce an array that contains every item shared between all the
   // passed-in arrays.
   _.intersection = function(array) {
-    if (array == null) return [];
     var result = [];
     var argsLength = arguments.length;
-    for (var i = 0, length = array.length; i < length; i++) {
+    for (var i = 0, length = getLength(array); i < length; i++) {
       var item = array[i];
       if (_.contains(result, item)) continue;
       for (var j = 1; j < argsLength; j++) {
@@ -963,29 +948,28 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Zip together multiple lists into a single array -- elements that share
   // an index go together.
-  _.zip = function(array) {
-    if (array == null) return [];
-    var length = _.max(arguments, 'length').length;
-    var results = Array(length);
-    while (length-- > 0) {
-      results[length] = _.pluck(arguments, length);
-    }
-    return results;
+  _.zip = function() {
+    return _.unzip(arguments);
   };
 
   // Complement of _.zip. Unzip accepts an array of arrays and groups
   // each array's elements on shared indices
   _.unzip = function(array) {
-    return _.zip.apply(null, array);
+    var length = array && _.max(array, getLength).length || 0;
+    var result = Array(length);
+
+    for (var index = 0; index < length; index++) {
+      result[index] = _.pluck(array, index);
+    }
+    return result;
   };
 
   // Converts lists into objects. Pass either a single array of `[key, value]`
   // pairs, or two parallel arrays of the same length -- one of keys, and one of
   // the corresponding values.
   _.object = function(list, values) {
-    if (list == null) return {};
     var result = {};
-    for (var i = 0, length = list.length; i < length; i++) {
+    for (var i = 0, length = getLength(list); i < length; i++) {
       if (values) {
         result[list[i]] = values[i];
       } else {
@@ -995,59 +979,73 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return result;
   };
 
-  // Return the position of the first occurrence of an item in an array,
-  // or -1 if the item is not included in the array.
-  // If the array is large and already in sort order, pass `true`
-  // for **isSorted** to use binary search.
-  _.indexOf = function(array, item, isSorted) {
-    var i = 0, length = array && array.length;
-    if (typeof isSorted == 'number') {
-      i = isSorted < 0 ? Math.max(0, length + isSorted) : isSorted;
-    } else if (isSorted && length) {
-      i = _.sortedIndex(array, item);
-      return array[i] === item ? i : -1;
-    }
-    for (; i < length; i++) if (array[i] === item) return i;
-    return -1;
-  };
-
-  _.lastIndexOf = function(array, item, from) {
-    var idx = array ? array.length : 0;
-    if (typeof from == 'number') {
-      idx = from < 0 ? idx + from + 1 : Math.min(idx, from + 1);
-    }
-    while (--idx >= 0) if (array[idx] === item) return idx;
-    return -1;
-  };
+  // Generator function to create the findIndex and findLastIndex functions
+  function createPredicateIndexFinder(dir) {
+    return function(array, predicate, context) {
+      predicate = cb(predicate, context);
+      var length = getLength(array);
+      var index = dir > 0 ? 0 : length - 1;
+      for (; index >= 0 && index < length; index += dir) {
+        if (predicate(array[index], index, array)) return index;
+      }
+      return -1;
+    };
+  }
 
   // Returns the first index on an array-like that passes a predicate test
-  _.findIndex = function(array, predicate, context) {
-    predicate = cb(predicate, context);
-    var length = array != null ? array.length : 0;
-    for (var i = 0; i < length; i++) {
-      if (predicate(array[i], i, array)) return i;
-    }
-    return -1;
-  };
+  _.findIndex = createPredicateIndexFinder(1);
+  _.findLastIndex = createPredicateIndexFinder(-1);
 
   // Use a comparator function to figure out the smallest index at which
   // an object should be inserted so as to maintain order. Uses binary search.
   _.sortedIndex = function(array, obj, iteratee, context) {
     iteratee = cb(iteratee, context, 1);
     var value = iteratee(obj);
-    var low = 0, high = array.length;
+    var low = 0, high = getLength(array);
     while (low < high) {
       var mid = Math.floor((low + high) / 2);
-      if (_.comparator(iteratee(array[mid]), value) < 0) low = mid + 1; else high = mid;
+      if (iteratee(array[mid]) < value) low = mid + 1; else high = mid;
     }
     return low;
   };
+
+  // Generator function to create the indexOf and lastIndexOf functions
+  function createIndexFinder(dir, predicateFind, sortedIndex) {
+    return function(array, item, idx) {
+      var i = 0, length = getLength(array);
+      if (typeof idx == 'number') {
+        if (dir > 0) {
+            i = idx >= 0 ? idx : Math.max(idx + length, i);
+        } else {
+            length = idx >= 0 ? Math.min(idx + 1, length) : idx + length + 1;
+        }
+      } else if (sortedIndex && idx && length) {
+        idx = sortedIndex(array, item);
+        return array[idx] === item ? idx : -1;
+      }
+      if (item !== item) {
+        idx = predicateFind(slice.call(array, i, length), _.isNaN);
+        return idx >= 0 ? idx + i : -1;
+      }
+      for (idx = dir > 0 ? i : length - 1; idx >= 0 && idx < length; idx += dir) {
+        if (array[idx] === item) return idx;
+      }
+      return -1;
+    };
+  }
+
+  // Return the position of the first occurrence of an item in an array,
+  // or -1 if the item is not included in the array.
+  // If the array is large and already in sort order, pass `true`
+  // for **isSorted** to use binary search.
+  _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
+  _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
 
   // Generate an integer Array containing an arithmetic progression. A port of
   // the native Python `range()` function. See
   // [the Python documentation](http://docs.python.org/library/functions.html#range).
   _.range = function(start, stop, step) {
-    if (arguments.length <= 1) {
+    if (stop == null) {
       stop = start || 0;
       start = 0;
     }
@@ -1083,9 +1081,10 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
     if (!_.isFunction(func)) throw new TypeError('Bind must be called on a function');
     var args = slice.call(arguments, 2);
-    return function bound() {
+    var bound = function() {
       return executeBound(func, bound, context, this, args.concat(slice.call(arguments)));
     };
+    return bound;
   };
 
   // Partially apply a function by creating a version that has had some of its
@@ -1093,15 +1092,16 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   // as a placeholder, allowing any combination of arguments to be pre-filled.
   _.partial = function(func) {
     var boundArgs = slice.call(arguments, 1);
-    return function bound() {
-      var position = 0;
-      var args = boundArgs.slice();
-      for (var i = 0, length = args.length; i < length; i++) {
-        if (args[i] === _) args[i] = arguments[position++];
+    var bound = function() {
+      var position = 0, length = boundArgs.length;
+      var args = Array(length);
+      for (var i = 0; i < length; i++) {
+        args[i] = boundArgs[i] === _ ? arguments[position++] : boundArgs[i];
       }
       while (position < arguments.length) args.push(arguments[position++]);
       return executeBound(func, bound, this, this, args);
     };
+    return bound;
   };
 
   // Bind a number of an object's methods to that object. Remaining arguments
@@ -1272,17 +1272,21 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Keys in IE < 9 that won't be iterated by `for key in ...` and thus missed.
   var hasEnumBug = !{toString: null}.propertyIsEnumerable('toString');
-  var nonEnumerableProps = ['constructor', 'valueOf', 'isPrototypeOf', 'toString',
+  var nonEnumerableProps = ['valueOf', 'isPrototypeOf', 'toString',
                       'propertyIsEnumerable', 'hasOwnProperty', 'toLocaleString'];
 
   function collectNonEnumProps(obj, keys) {
     var nonEnumIdx = nonEnumerableProps.length;
-    var proto = typeof obj.constructor === 'function' ? FuncProto : ObjProto;
+    var constructor = obj.constructor;
+    var proto = (_.isFunction(constructor) && constructor.prototype) || ObjProto;
+
+    // Constructor is a special case.
+    var prop = 'constructor';
+    if (_.has(obj, prop) && !_.contains(keys, prop)) keys.push(prop);
 
     while (nonEnumIdx--) {
-      var prop = nonEnumerableProps[nonEnumIdx];
-      if (prop === 'constructor' ? _.has(obj, prop) : prop in obj &&
-        obj[prop] !== proto[prop] && !_.contains(keys, prop)) {
+      prop = nonEnumerableProps[nonEnumIdx];
+      if (prop in obj && obj[prop] !== proto[prop] && !_.contains(keys, prop)) {
         keys.push(prop);
       }
     }
@@ -1301,7 +1305,7 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Retrieve all the property names of an object.
-  _.keysIn = function(obj) {
+  _.allKeys = function(obj) {
     if (!_.isObject(obj)) return [];
     var keys = [];
     for (var key in obj) keys.push(key);
@@ -1319,6 +1323,21 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
       values[i] = obj[keys[i]];
     }
     return values;
+  };
+
+  // Returns the results of applying the iteratee to each element of the object
+  // In contrast to _.map it returns an object
+  _.mapObject = function(obj, iteratee, context) {
+    iteratee = cb(iteratee, context);
+    var keys =  _.keys(obj),
+          length = keys.length,
+          results = {},
+          currentKey;
+      for (var index = 0; index < length; index++) {
+        currentKey = keys[index];
+        results[currentKey] = iteratee(obj[currentKey], currentKey, obj);
+      }
+      return results;
   };
 
   // Convert an object into a list of `[key, value]` pairs.
@@ -1353,11 +1372,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Extend a given object with all the properties in passed-in object(s).
-  _.extend = createAssigner(_.keysIn);
+  _.extend = createAssigner(_.allKeys);
 
   // Assigns a given object with all the own properties in the passed-in object(s)
   // (https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
-  _.assign = createAssigner(_.keys);
+  _.extendOwn = _.assign = createAssigner(_.keys);
 
   // Returns the first key on an object that passes a predicate test
   _.findKey = function(obj, predicate, context) {
@@ -1370,22 +1389,21 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Return a copy of the object only containing the whitelisted properties.
-  _.pick = function(obj, iteratee, context) {
-    var result = {}, key;
+  _.pick = function(object, oiteratee, context) {
+    var result = {}, obj = object, iteratee, keys;
     if (obj == null) return result;
-    if (_.isFunction(iteratee)) {
-      iteratee = optimizeCb(iteratee, context);
-      for (key in obj) {
-        var value = obj[key];
-        if (iteratee(value, key, obj)) result[key] = value;
-      }
+    if (_.isFunction(oiteratee)) {
+      keys = _.allKeys(obj);
+      iteratee = optimizeCb(oiteratee, context);
     } else {
-      var keys = flatten(arguments, false, false, 1);
-      obj = new Object(obj);
-      for (var i = 0, length = keys.length; i < length; i++) {
-        key = keys[i];
-        if (key in obj) result[key] = obj[key];
-      }
+      keys = flatten(arguments, false, false, 1);
+      iteratee = function(value, key, obj) { return key in obj; };
+      obj = Object(obj);
+    }
+    for (var i = 0, length = keys.length; i < length; i++) {
+      var key = keys[i];
+      var value = obj[key];
+      if (iteratee(value, key, obj)) result[key] = value;
     }
     return result;
   };
@@ -1404,23 +1422,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
   };
 
   // Fill in a given object with default properties.
-  _.defaults = function(obj) {
-    if (!_.isObject(obj)) return obj;
-    for (var i = 1, length = arguments.length; i < length; i++) {
-      var source = arguments[i];
-      for (var prop in source) {
-        if (obj[prop] === void 0) obj[prop] = source[prop];
-      }
-    }
-    return obj;
-  };
+  _.defaults = createAssigner(_.allKeys, true);
 
   // Creates an object that inherits from the given prototype object.
   // If additional properties are provided then they will be added to the
   // created object.
   _.create = function(prototype, props) {
     var result = baseCreate(prototype);
-    if (props) _.assign(result, props);
+    if (props) _.extendOwn(result, props);
     return result;
   };
 
@@ -1437,6 +1446,19 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     interceptor(obj);
     return obj;
   };
+
+  // Returns whether an object has a given set of `key:value` pairs.
+  _.isMatch = function(object, attrs) {
+    var keys = _.keys(attrs), length = keys.length;
+    if (object == null) return !length;
+    var obj = Object(object);
+    for (var i = 0; i < length; i++) {
+      var key = keys[i];
+      if (attrs[key] !== obj[key] || !(key in obj)) return false;
+    }
+    return true;
+  };
+
 
   // Internal recursive comparison function for `isEqual`.
   var eq = function(a, b, aStack, bStack) {
@@ -1488,6 +1510,11 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     }
     // Assume equality for cyclic structures. The algorithm for detecting cyclic
     // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+
+    // Initializing stack of traversed objects.
+    // It's done here since we only need them for objects and arrays comparison.
+    aStack = aStack || [];
+    bStack = bStack || [];
     var length = aStack.length;
     while (length--) {
       // Linear search. Performance is inversely proportional to the number of
@@ -1528,16 +1555,15 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   // Perform a deep comparison to check if two objects are equal.
   _.isEqual = function(a, b) {
-    return eq(a, b, [], []);
+    return eq(a, b);
   };
 
   // Is a given array, string, or object empty?
   // An "empty" object has no enumerable own-properties.
   _.isEmpty = function(obj) {
     if (obj == null) return true;
-    if (_.isArray(obj) || _.isString(obj) || _.isArguments(obj)) return obj.length === 0;
-    for (var key in obj) if (_.has(obj, key)) return false;
-    return true;
+    if (isArrayLike(obj) && (_.isArray(obj) || _.isString(obj) || _.isArguments(obj))) return obj.length === 0;
+    return _.keys(obj).length === 0;
   };
 
   // Is a given value a DOM element?
@@ -1572,8 +1598,8 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     };
   }
 
-  // Optimize `isFunction` if appropriate. Work around an IE 11 bug (#1621).
-  // Work around a Safari 8 bug (#1929)
+  // Optimize `isFunction` if appropriate. Work around some typeof bugs in old v8,
+  // IE 11 (#1621), and in Safari 8 (#1929).
   if (typeof /./ != 'function' && typeof Int8Array != 'object') {
     _.isFunction = function(obj) {
       return typeof obj == 'function' || false;
@@ -1635,43 +1661,22 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 
   _.noop = function(){};
 
-  _.property = function(key) {
-    return function(obj) {
-      return obj == null ? void 0 : obj[key];
-    };
-  };
+  _.property = property;
 
-  // Generates a function for a given object that returns a given property (including those of ancestors)
+  // Generates a function for a given object that returns a given property.
   _.propertyOf = function(obj) {
     return obj == null ? function(){} : function(key) {
       return obj[key];
     };
   };
 
-  // Returns a predicate for checking whether an object has a given set of `key:value` pairs.
-  _.matches = function(attrs) {
-    var pairs = _.pairs(attrs), length = pairs.length;
+  // Returns a predicate for checking whether an object has a given set of
+  // `key:value` pairs.
+  _.matcher = _.matches = function(attrs) {
+    attrs = _.extendOwn({}, attrs);
     return function(obj) {
-      if (obj == null) return !length;
-      obj = new Object(obj);
-      for (var i = 0; i < length; i++) {
-        var pair = pairs[i], key = pair[0];
-        if (pair[1] !== obj[key] || !(key in obj)) return false;
-      }
-      return true;
+      return _.isMatch(obj, attrs);
     };
-  };
-
-  // Default internal comparator for determining whether a is greater (1),
-  // equal (0) or less than (-1) some object b
-  _.comparator = function(a, b) {
-    if (a === b) return 0;
-    var isAComparable = a >= a, isBComparable = b >= b;
-    if (isAComparable || isBComparable) {
-      if (isAComparable && !isBComparable) return -1;
-      if (isBComparable && !isAComparable) return 1;
-    }
-    return a > b ? 1 : (b > a) ? -1 : 0;
   };
 
   // Run a function **n** times.
@@ -1889,6 +1894,14 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
     return this._wrapped;
   };
 
+  // Provide unwrapping proxy for some methods used in engine operations
+  // such as arithmetic and JSON stringification.
+  _.prototype.valueOf = _.prototype.toJSON = _.prototype.value;
+
+  _.prototype.toString = function() {
+    return '' + this._wrapped;
+  };
+
   // AMD registration happens at the end for compatibility with AMD loaders
   // that may not enforce next-turn semantics on modules. Even though general
   // practice for AMD registration is to be anonymous, underscore registers
@@ -1904,1794 +1917,1682 @@ require.register("jashkenas-underscore/underscore.js", function(exports, require
 }.call(this));
 
 });
-require.register("noflo-fbp/lib/fbp.js", function(exports, require, module){
-module.exports = (function(){
+require.register("flowbased-fbp/lib/fbp.js", function(exports, require, module){
+module.exports = (function() {
   /*
-   * Generated by PEG.js 0.7.0.
+   * Generated by PEG.js 0.8.0.
    *
    * http://pegjs.majda.cz/
    */
-  
-  function quote(s) {
-    /*
-     * ECMA-262, 5th ed., 7.8.4: All characters may appear literally in a
-     * string literal except for the closing quote character, backslash,
-     * carriage return, line separator, paragraph separator, and line feed.
-     * Any character may appear in the form of an escape sequence.
-     *
-     * For portability, we also escape escape all control and non-ASCII
-     * characters. Note that "\0" and "\v" escape sequences are not used
-     * because JSHint does not like the first and IE the second.
-     */
-     return '"' + s
-      .replace(/\\/g, '\\\\')  // backslash
-      .replace(/"/g, '\\"')    // closing quote character
-      .replace(/\x08/g, '\\b') // backspace
-      .replace(/\t/g, '\\t')   // horizontal tab
-      .replace(/\n/g, '\\n')   // line feed
-      .replace(/\f/g, '\\f')   // form feed
-      .replace(/\r/g, '\\r')   // carriage return
-      .replace(/[\x00-\x07\x0B\x0E-\x1F\x80-\uFFFF]/g, escape)
-      + '"';
+
+  function peg$subclass(child, parent) {
+    function ctor() { this.constructor = child; }
+    ctor.prototype = parent.prototype;
+    child.prototype = new ctor();
   }
-  
-  var result = {
-    /*
-     * Parses the input with a generated parser. If the parsing is successfull,
-     * returns a value explicitly or implicitly specified by the grammar from
-     * which the parser was generated (see |PEG.buildParser|). If the parsing is
-     * unsuccessful, throws |PEG.parser.SyntaxError| describing the error.
-     */
-    parse: function(input, startRule) {
-      var parseFunctions = {
-        "start": parse_start,
-        "line": parse_line,
-        "LineTerminator": parse_LineTerminator,
-        "comment": parse_comment,
-        "connection": parse_connection,
-        "bridge": parse_bridge,
-        "leftlet": parse_leftlet,
-        "iip": parse_iip,
-        "rightlet": parse_rightlet,
-        "node": parse_node,
-        "component": parse_component,
-        "compMeta": parse_compMeta,
-        "port": parse_port,
-        "portWithIndex": parse_portWithIndex,
-        "anychar": parse_anychar,
-        "iipchar": parse_iipchar,
-        "_": parse__,
-        "__": parse___
-      };
-      
-      if (startRule !== undefined) {
-        if (parseFunctions[startRule] === undefined) {
-          throw new Error("Invalid rule name: " + quote(startRule) + ".");
+
+  function SyntaxError(message, expected, found, offset, line, column) {
+    this.message  = message;
+    this.expected = expected;
+    this.found    = found;
+    this.offset   = offset;
+    this.line     = line;
+    this.column   = column;
+
+    this.name     = "SyntaxError";
+  }
+
+  peg$subclass(SyntaxError, Error);
+
+  function parse(input) {
+    var options = arguments.length > 1 ? arguments[1] : {},
+
+        peg$FAILED = {},
+
+        peg$startRuleFunctions = { start: peg$parsestart },
+        peg$startRuleFunction  = peg$parsestart,
+
+        peg$c0 = [],
+        peg$c1 = function() { return parser.getResult();  },
+        peg$c2 = peg$FAILED,
+        peg$c3 = "EXPORT=",
+        peg$c4 = { type: "literal", value: "EXPORT=", description: "\"EXPORT=\"" },
+        peg$c5 = /^[A-Za-z.0-9_]/,
+        peg$c6 = { type: "class", value: "[A-Za-z.0-9_]", description: "[A-Za-z.0-9_]" },
+        peg$c7 = ":",
+        peg$c8 = { type: "literal", value: ":", description: "\":\"" },
+        peg$c9 = /^[A-Z0-9_]/,
+        peg$c10 = { type: "class", value: "[A-Z0-9_]", description: "[A-Z0-9_]" },
+        peg$c11 = null,
+        peg$c12 = function(priv, pub) {return parser.registerExports(priv.join(""),pub.join(""))},
+        peg$c13 = "INPORT=",
+        peg$c14 = { type: "literal", value: "INPORT=", description: "\"INPORT=\"" },
+        peg$c15 = /^[A-Za-z0-9_]/,
+        peg$c16 = { type: "class", value: "[A-Za-z0-9_]", description: "[A-Za-z0-9_]" },
+        peg$c17 = ".",
+        peg$c18 = { type: "literal", value: ".", description: "\".\"" },
+        peg$c19 = function(node, port, pub) {return parser.registerInports(node.join(""),port.join(""),pub.join(""))},
+        peg$c20 = "OUTPORT=",
+        peg$c21 = { type: "literal", value: "OUTPORT=", description: "\"OUTPORT=\"" },
+        peg$c22 = function(node, port, pub) {return parser.registerOutports(node.join(""),port.join(""),pub.join(""))},
+        peg$c23 = /^[\n\r\u2028\u2029]/,
+        peg$c24 = { type: "class", value: "[\\n\\r\\u2028\\u2029]", description: "[\\n\\r\\u2028\\u2029]" },
+        peg$c25 = function(edges) {return parser.registerEdges(edges);},
+        peg$c26 = ",",
+        peg$c27 = { type: "literal", value: ",", description: "\",\"" },
+        peg$c28 = "#",
+        peg$c29 = { type: "literal", value: "#", description: "\"#\"" },
+        peg$c30 = "->",
+        peg$c31 = { type: "literal", value: "->", description: "\"->\"" },
+        peg$c32 = function(x, y) { return [x,y]; },
+        peg$c33 = function(x, proc, y) { return [{"tgt":{process:proc, port:x}},{"src":{process:proc, port:y}}]; },
+        peg$c34 = function(proc, port) { return {"src":{process:proc, port:port}} },
+        peg$c35 = function(proc, port) { return {"src":{process:proc, port:port.port, index: port.index}} },
+        peg$c36 = "'",
+        peg$c37 = { type: "literal", value: "'", description: "\"'\"" },
+        peg$c38 = function(iip) { return {"data":iip.join("")} },
+        peg$c39 = function(port, proc) { return {"tgt":{process:proc, port:port}} },
+        peg$c40 = function(port, proc) { return {"tgt":{process:proc, port:port.port, index: port.index}} },
+        peg$c41 = /^[a-zA-Z0-9_\-]/,
+        peg$c42 = { type: "class", value: "[a-zA-Z0-9_\\-]", description: "[a-zA-Z0-9_\\-]" },
+        peg$c43 = function(node, comp) { if(comp){parser.addNode(node.join(""),comp);}; return node.join("")},
+        peg$c44 = "(",
+        peg$c45 = { type: "literal", value: "(", description: "\"(\"" },
+        peg$c46 = /^[a-zA-Z\/\-0-9_]/,
+        peg$c47 = { type: "class", value: "[a-zA-Z\\/\\-0-9_]", description: "[a-zA-Z\\/\\-0-9_]" },
+        peg$c48 = ")",
+        peg$c49 = { type: "literal", value: ")", description: "\")\"" },
+        peg$c50 = function(comp, meta) { var o = {}; comp ? o.comp = comp.join("") : o.comp = ''; meta ? o.meta = meta.join("").split(',') : null; return o; },
+        peg$c51 = /^[a-zA-Z\/=_,0-9]/,
+        peg$c52 = { type: "class", value: "[a-zA-Z\\/=_,0-9]", description: "[a-zA-Z\\/=_,0-9]" },
+        peg$c53 = function(meta) {return meta},
+        peg$c54 = /^[A-Z.0-9_]/,
+        peg$c55 = { type: "class", value: "[A-Z.0-9_]", description: "[A-Z.0-9_]" },
+        peg$c56 = function(portname) {return portname.join("").toLowerCase()},
+        peg$c57 = "[",
+        peg$c58 = { type: "literal", value: "[", description: "\"[\"" },
+        peg$c59 = /^[0-9]/,
+        peg$c60 = { type: "class", value: "[0-9]", description: "[0-9]" },
+        peg$c61 = "]",
+        peg$c62 = { type: "literal", value: "]", description: "\"]\"" },
+        peg$c63 = function(portname, portindex) {return { port: portname.join("").toLowerCase(), index: parseInt(portindex.join('')) }},
+        peg$c64 = /^[^\n\r\u2028\u2029]/,
+        peg$c65 = { type: "class", value: "[^\\n\\r\\u2028\\u2029]", description: "[^\\n\\r\\u2028\\u2029]" },
+        peg$c66 = /^[\\]/,
+        peg$c67 = { type: "class", value: "[\\\\]", description: "[\\\\]" },
+        peg$c68 = /^[']/,
+        peg$c69 = { type: "class", value: "[']", description: "[']" },
+        peg$c70 = function() { return "'"; },
+        peg$c71 = /^[^']/,
+        peg$c72 = { type: "class", value: "[^']", description: "[^']" },
+        peg$c73 = " ",
+        peg$c74 = { type: "literal", value: " ", description: "\" \"" },
+
+        peg$currPos          = 0,
+        peg$reportedPos      = 0,
+        peg$cachedPos        = 0,
+        peg$cachedPosDetails = { line: 1, column: 1, seenCR: false },
+        peg$maxFailPos       = 0,
+        peg$maxFailExpected  = [],
+        peg$silentFails      = 0,
+
+        peg$result;
+
+    if ("startRule" in options) {
+      if (!(options.startRule in peg$startRuleFunctions)) {
+        throw new Error("Can't start parsing from rule \"" + options.startRule + "\".");
+      }
+
+      peg$startRuleFunction = peg$startRuleFunctions[options.startRule];
+    }
+
+    function text() {
+      return input.substring(peg$reportedPos, peg$currPos);
+    }
+
+    function offset() {
+      return peg$reportedPos;
+    }
+
+    function line() {
+      return peg$computePosDetails(peg$reportedPos).line;
+    }
+
+    function column() {
+      return peg$computePosDetails(peg$reportedPos).column;
+    }
+
+    function expected(description) {
+      throw peg$buildException(
+        null,
+        [{ type: "other", description: description }],
+        peg$reportedPos
+      );
+    }
+
+    function error(message) {
+      throw peg$buildException(message, null, peg$reportedPos);
+    }
+
+    function peg$computePosDetails(pos) {
+      function advance(details, startPos, endPos) {
+        var p, ch;
+
+        for (p = startPos; p < endPos; p++) {
+          ch = input.charAt(p);
+          if (ch === "\n") {
+            if (!details.seenCR) { details.line++; }
+            details.column = 1;
+            details.seenCR = false;
+          } else if (ch === "\r" || ch === "\u2028" || ch === "\u2029") {
+            details.line++;
+            details.column = 1;
+            details.seenCR = true;
+          } else {
+            details.column++;
+            details.seenCR = false;
+          }
+        }
+      }
+
+      if (peg$cachedPos !== pos) {
+        if (peg$cachedPos > pos) {
+          peg$cachedPos = 0;
+          peg$cachedPosDetails = { line: 1, column: 1, seenCR: false };
+        }
+        advance(peg$cachedPosDetails, peg$cachedPos, pos);
+        peg$cachedPos = pos;
+      }
+
+      return peg$cachedPosDetails;
+    }
+
+    function peg$fail(expected) {
+      if (peg$currPos < peg$maxFailPos) { return; }
+
+      if (peg$currPos > peg$maxFailPos) {
+        peg$maxFailPos = peg$currPos;
+        peg$maxFailExpected = [];
+      }
+
+      peg$maxFailExpected.push(expected);
+    }
+
+    function peg$buildException(message, expected, pos) {
+      function cleanupExpected(expected) {
+        var i = 1;
+
+        expected.sort(function(a, b) {
+          if (a.description < b.description) {
+            return -1;
+          } else if (a.description > b.description) {
+            return 1;
+          } else {
+            return 0;
+          }
+        });
+
+        while (i < expected.length) {
+          if (expected[i - 1] === expected[i]) {
+            expected.splice(i, 1);
+          } else {
+            i++;
+          }
+        }
+      }
+
+      function buildMessage(expected, found) {
+        function stringEscape(s) {
+          function hex(ch) { return ch.charCodeAt(0).toString(16).toUpperCase(); }
+
+          return s
+            .replace(/\\/g,   '\\\\')
+            .replace(/"/g,    '\\"')
+            .replace(/\x08/g, '\\b')
+            .replace(/\t/g,   '\\t')
+            .replace(/\n/g,   '\\n')
+            .replace(/\f/g,   '\\f')
+            .replace(/\r/g,   '\\r')
+            .replace(/[\x00-\x07\x0B\x0E\x0F]/g, function(ch) { return '\\x0' + hex(ch); })
+            .replace(/[\x10-\x1F\x80-\xFF]/g,    function(ch) { return '\\x'  + hex(ch); })
+            .replace(/[\u0180-\u0FFF]/g,         function(ch) { return '\\u0' + hex(ch); })
+            .replace(/[\u1080-\uFFFF]/g,         function(ch) { return '\\u'  + hex(ch); });
+        }
+
+        var expectedDescs = new Array(expected.length),
+            expectedDesc, foundDesc, i;
+
+        for (i = 0; i < expected.length; i++) {
+          expectedDescs[i] = expected[i].description;
+        }
+
+        expectedDesc = expected.length > 1
+          ? expectedDescs.slice(0, -1).join(", ")
+              + " or "
+              + expectedDescs[expected.length - 1]
+          : expectedDescs[0];
+
+        foundDesc = found ? "\"" + stringEscape(found) + "\"" : "end of input";
+
+        return "Expected " + expectedDesc + " but " + foundDesc + " found.";
+      }
+
+      var posDetails = peg$computePosDetails(pos),
+          found      = pos < input.length ? input.charAt(pos) : null;
+
+      if (expected !== null) {
+        cleanupExpected(expected);
+      }
+
+      return new SyntaxError(
+        message !== null ? message : buildMessage(expected, found),
+        expected,
+        found,
+        pos,
+        posDetails.line,
+        posDetails.column
+      );
+    }
+
+    function peg$parsestart() {
+      var s0, s1, s2;
+
+      s0 = peg$currPos;
+      s1 = [];
+      s2 = peg$parseline();
+      while (s2 !== peg$FAILED) {
+        s1.push(s2);
+        s2 = peg$parseline();
+      }
+      if (s1 !== peg$FAILED) {
+        peg$reportedPos = s0;
+        s1 = peg$c1();
+      }
+      s0 = s1;
+
+      return s0;
+    }
+
+    function peg$parseline() {
+      var s0, s1, s2, s3, s4, s5, s6, s7, s8, s9;
+
+      s0 = peg$currPos;
+      s1 = peg$parse_();
+      if (s1 !== peg$FAILED) {
+        if (input.substr(peg$currPos, 7) === peg$c3) {
+          s2 = peg$c3;
+          peg$currPos += 7;
+        } else {
+          s2 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c4); }
+        }
+        if (s2 !== peg$FAILED) {
+          s3 = [];
+          if (peg$c5.test(input.charAt(peg$currPos))) {
+            s4 = input.charAt(peg$currPos);
+            peg$currPos++;
+          } else {
+            s4 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c6); }
+          }
+          if (s4 !== peg$FAILED) {
+            while (s4 !== peg$FAILED) {
+              s3.push(s4);
+              if (peg$c5.test(input.charAt(peg$currPos))) {
+                s4 = input.charAt(peg$currPos);
+                peg$currPos++;
+              } else {
+                s4 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c6); }
+              }
+            }
+          } else {
+            s3 = peg$c2;
+          }
+          if (s3 !== peg$FAILED) {
+            if (input.charCodeAt(peg$currPos) === 58) {
+              s4 = peg$c7;
+              peg$currPos++;
+            } else {
+              s4 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c8); }
+            }
+            if (s4 !== peg$FAILED) {
+              s5 = [];
+              if (peg$c9.test(input.charAt(peg$currPos))) {
+                s6 = input.charAt(peg$currPos);
+                peg$currPos++;
+              } else {
+                s6 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c10); }
+              }
+              if (s6 !== peg$FAILED) {
+                while (s6 !== peg$FAILED) {
+                  s5.push(s6);
+                  if (peg$c9.test(input.charAt(peg$currPos))) {
+                    s6 = input.charAt(peg$currPos);
+                    peg$currPos++;
+                  } else {
+                    s6 = peg$FAILED;
+                    if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                  }
+                }
+              } else {
+                s5 = peg$c2;
+              }
+              if (s5 !== peg$FAILED) {
+                s6 = peg$parse_();
+                if (s6 !== peg$FAILED) {
+                  s7 = peg$parseLineTerminator();
+                  if (s7 === peg$FAILED) {
+                    s7 = peg$c11;
+                  }
+                  if (s7 !== peg$FAILED) {
+                    peg$reportedPos = s0;
+                    s1 = peg$c12(s3, s5);
+                    s0 = s1;
+                  } else {
+                    peg$currPos = s0;
+                    s0 = peg$c2;
+                  }
+                } else {
+                  peg$currPos = s0;
+                  s0 = peg$c2;
+                }
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
         }
       } else {
-        startRule = "start";
+        peg$currPos = s0;
+        s0 = peg$c2;
       }
-      
-      var pos = 0;
-      var reportFailures = 0;
-      var rightmostFailuresPos = 0;
-      var rightmostFailuresExpected = [];
-      
-      function padLeft(input, padding, length) {
-        var result = input;
-        
-        var padLength = length - input.length;
-        for (var i = 0; i < padLength; i++) {
-          result = padding + result;
+      if (s0 === peg$FAILED) {
+        s0 = peg$currPos;
+        s1 = peg$parse_();
+        if (s1 !== peg$FAILED) {
+          if (input.substr(peg$currPos, 7) === peg$c13) {
+            s2 = peg$c13;
+            peg$currPos += 7;
+          } else {
+            s2 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c14); }
+          }
+          if (s2 !== peg$FAILED) {
+            s3 = [];
+            if (peg$c15.test(input.charAt(peg$currPos))) {
+              s4 = input.charAt(peg$currPos);
+              peg$currPos++;
+            } else {
+              s4 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c16); }
+            }
+            if (s4 !== peg$FAILED) {
+              while (s4 !== peg$FAILED) {
+                s3.push(s4);
+                if (peg$c15.test(input.charAt(peg$currPos))) {
+                  s4 = input.charAt(peg$currPos);
+                  peg$currPos++;
+                } else {
+                  s4 = peg$FAILED;
+                  if (peg$silentFails === 0) { peg$fail(peg$c16); }
+                }
+              }
+            } else {
+              s3 = peg$c2;
+            }
+            if (s3 !== peg$FAILED) {
+              if (input.charCodeAt(peg$currPos) === 46) {
+                s4 = peg$c17;
+                peg$currPos++;
+              } else {
+                s4 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c18); }
+              }
+              if (s4 !== peg$FAILED) {
+                s5 = [];
+                if (peg$c9.test(input.charAt(peg$currPos))) {
+                  s6 = input.charAt(peg$currPos);
+                  peg$currPos++;
+                } else {
+                  s6 = peg$FAILED;
+                  if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                }
+                if (s6 !== peg$FAILED) {
+                  while (s6 !== peg$FAILED) {
+                    s5.push(s6);
+                    if (peg$c9.test(input.charAt(peg$currPos))) {
+                      s6 = input.charAt(peg$currPos);
+                      peg$currPos++;
+                    } else {
+                      s6 = peg$FAILED;
+                      if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                    }
+                  }
+                } else {
+                  s5 = peg$c2;
+                }
+                if (s5 !== peg$FAILED) {
+                  if (input.charCodeAt(peg$currPos) === 58) {
+                    s6 = peg$c7;
+                    peg$currPos++;
+                  } else {
+                    s6 = peg$FAILED;
+                    if (peg$silentFails === 0) { peg$fail(peg$c8); }
+                  }
+                  if (s6 !== peg$FAILED) {
+                    s7 = [];
+                    if (peg$c9.test(input.charAt(peg$currPos))) {
+                      s8 = input.charAt(peg$currPos);
+                      peg$currPos++;
+                    } else {
+                      s8 = peg$FAILED;
+                      if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                    }
+                    if (s8 !== peg$FAILED) {
+                      while (s8 !== peg$FAILED) {
+                        s7.push(s8);
+                        if (peg$c9.test(input.charAt(peg$currPos))) {
+                          s8 = input.charAt(peg$currPos);
+                          peg$currPos++;
+                        } else {
+                          s8 = peg$FAILED;
+                          if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                        }
+                      }
+                    } else {
+                      s7 = peg$c2;
+                    }
+                    if (s7 !== peg$FAILED) {
+                      s8 = peg$parse_();
+                      if (s8 !== peg$FAILED) {
+                        s9 = peg$parseLineTerminator();
+                        if (s9 === peg$FAILED) {
+                          s9 = peg$c11;
+                        }
+                        if (s9 !== peg$FAILED) {
+                          peg$reportedPos = s0;
+                          s1 = peg$c19(s3, s5, s7);
+                          s0 = s1;
+                        } else {
+                          peg$currPos = s0;
+                          s0 = peg$c2;
+                        }
+                      } else {
+                        peg$currPos = s0;
+                        s0 = peg$c2;
+                      }
+                    } else {
+                      peg$currPos = s0;
+                      s0 = peg$c2;
+                    }
+                  } else {
+                    peg$currPos = s0;
+                    s0 = peg$c2;
+                  }
+                } else {
+                  peg$currPos = s0;
+                  s0 = peg$c2;
+                }
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
         }
-        
+        if (s0 === peg$FAILED) {
+          s0 = peg$currPos;
+          s1 = peg$parse_();
+          if (s1 !== peg$FAILED) {
+            if (input.substr(peg$currPos, 8) === peg$c20) {
+              s2 = peg$c20;
+              peg$currPos += 8;
+            } else {
+              s2 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c21); }
+            }
+            if (s2 !== peg$FAILED) {
+              s3 = [];
+              if (peg$c15.test(input.charAt(peg$currPos))) {
+                s4 = input.charAt(peg$currPos);
+                peg$currPos++;
+              } else {
+                s4 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c16); }
+              }
+              if (s4 !== peg$FAILED) {
+                while (s4 !== peg$FAILED) {
+                  s3.push(s4);
+                  if (peg$c15.test(input.charAt(peg$currPos))) {
+                    s4 = input.charAt(peg$currPos);
+                    peg$currPos++;
+                  } else {
+                    s4 = peg$FAILED;
+                    if (peg$silentFails === 0) { peg$fail(peg$c16); }
+                  }
+                }
+              } else {
+                s3 = peg$c2;
+              }
+              if (s3 !== peg$FAILED) {
+                if (input.charCodeAt(peg$currPos) === 46) {
+                  s4 = peg$c17;
+                  peg$currPos++;
+                } else {
+                  s4 = peg$FAILED;
+                  if (peg$silentFails === 0) { peg$fail(peg$c18); }
+                }
+                if (s4 !== peg$FAILED) {
+                  s5 = [];
+                  if (peg$c9.test(input.charAt(peg$currPos))) {
+                    s6 = input.charAt(peg$currPos);
+                    peg$currPos++;
+                  } else {
+                    s6 = peg$FAILED;
+                    if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                  }
+                  if (s6 !== peg$FAILED) {
+                    while (s6 !== peg$FAILED) {
+                      s5.push(s6);
+                      if (peg$c9.test(input.charAt(peg$currPos))) {
+                        s6 = input.charAt(peg$currPos);
+                        peg$currPos++;
+                      } else {
+                        s6 = peg$FAILED;
+                        if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                      }
+                    }
+                  } else {
+                    s5 = peg$c2;
+                  }
+                  if (s5 !== peg$FAILED) {
+                    if (input.charCodeAt(peg$currPos) === 58) {
+                      s6 = peg$c7;
+                      peg$currPos++;
+                    } else {
+                      s6 = peg$FAILED;
+                      if (peg$silentFails === 0) { peg$fail(peg$c8); }
+                    }
+                    if (s6 !== peg$FAILED) {
+                      s7 = [];
+                      if (peg$c9.test(input.charAt(peg$currPos))) {
+                        s8 = input.charAt(peg$currPos);
+                        peg$currPos++;
+                      } else {
+                        s8 = peg$FAILED;
+                        if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                      }
+                      if (s8 !== peg$FAILED) {
+                        while (s8 !== peg$FAILED) {
+                          s7.push(s8);
+                          if (peg$c9.test(input.charAt(peg$currPos))) {
+                            s8 = input.charAt(peg$currPos);
+                            peg$currPos++;
+                          } else {
+                            s8 = peg$FAILED;
+                            if (peg$silentFails === 0) { peg$fail(peg$c10); }
+                          }
+                        }
+                      } else {
+                        s7 = peg$c2;
+                      }
+                      if (s7 !== peg$FAILED) {
+                        s8 = peg$parse_();
+                        if (s8 !== peg$FAILED) {
+                          s9 = peg$parseLineTerminator();
+                          if (s9 === peg$FAILED) {
+                            s9 = peg$c11;
+                          }
+                          if (s9 !== peg$FAILED) {
+                            peg$reportedPos = s0;
+                            s1 = peg$c22(s3, s5, s7);
+                            s0 = s1;
+                          } else {
+                            peg$currPos = s0;
+                            s0 = peg$c2;
+                          }
+                        } else {
+                          peg$currPos = s0;
+                          s0 = peg$c2;
+                        }
+                      } else {
+                        peg$currPos = s0;
+                        s0 = peg$c2;
+                      }
+                    } else {
+                      peg$currPos = s0;
+                      s0 = peg$c2;
+                    }
+                  } else {
+                    peg$currPos = s0;
+                    s0 = peg$c2;
+                  }
+                } else {
+                  peg$currPos = s0;
+                  s0 = peg$c2;
+                }
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+          if (s0 === peg$FAILED) {
+            s0 = peg$currPos;
+            s1 = peg$parsecomment();
+            if (s1 !== peg$FAILED) {
+              if (peg$c23.test(input.charAt(peg$currPos))) {
+                s2 = input.charAt(peg$currPos);
+                peg$currPos++;
+              } else {
+                s2 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c24); }
+              }
+              if (s2 === peg$FAILED) {
+                s2 = peg$c11;
+              }
+              if (s2 !== peg$FAILED) {
+                s1 = [s1, s2];
+                s0 = s1;
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+            if (s0 === peg$FAILED) {
+              s0 = peg$currPos;
+              s1 = peg$parse_();
+              if (s1 !== peg$FAILED) {
+                if (peg$c23.test(input.charAt(peg$currPos))) {
+                  s2 = input.charAt(peg$currPos);
+                  peg$currPos++;
+                } else {
+                  s2 = peg$FAILED;
+                  if (peg$silentFails === 0) { peg$fail(peg$c24); }
+                }
+                if (s2 !== peg$FAILED) {
+                  s1 = [s1, s2];
+                  s0 = s1;
+                } else {
+                  peg$currPos = s0;
+                  s0 = peg$c2;
+                }
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+              if (s0 === peg$FAILED) {
+                s0 = peg$currPos;
+                s1 = peg$parse_();
+                if (s1 !== peg$FAILED) {
+                  s2 = peg$parseconnection();
+                  if (s2 !== peg$FAILED) {
+                    s3 = peg$parse_();
+                    if (s3 !== peg$FAILED) {
+                      s4 = peg$parseLineTerminator();
+                      if (s4 === peg$FAILED) {
+                        s4 = peg$c11;
+                      }
+                      if (s4 !== peg$FAILED) {
+                        peg$reportedPos = s0;
+                        s1 = peg$c25(s2);
+                        s0 = s1;
+                      } else {
+                        peg$currPos = s0;
+                        s0 = peg$c2;
+                      }
+                    } else {
+                      peg$currPos = s0;
+                      s0 = peg$c2;
+                    }
+                  } else {
+                    peg$currPos = s0;
+                    s0 = peg$c2;
+                  }
+                } else {
+                  peg$currPos = s0;
+                  s0 = peg$c2;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return s0;
+    }
+
+    function peg$parseLineTerminator() {
+      var s0, s1, s2, s3, s4;
+
+      s0 = peg$currPos;
+      s1 = peg$parse_();
+      if (s1 !== peg$FAILED) {
+        if (input.charCodeAt(peg$currPos) === 44) {
+          s2 = peg$c26;
+          peg$currPos++;
+        } else {
+          s2 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c27); }
+        }
+        if (s2 === peg$FAILED) {
+          s2 = peg$c11;
+        }
+        if (s2 !== peg$FAILED) {
+          s3 = peg$parsecomment();
+          if (s3 === peg$FAILED) {
+            s3 = peg$c11;
+          }
+          if (s3 !== peg$FAILED) {
+            if (peg$c23.test(input.charAt(peg$currPos))) {
+              s4 = input.charAt(peg$currPos);
+              peg$currPos++;
+            } else {
+              s4 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c24); }
+            }
+            if (s4 === peg$FAILED) {
+              s4 = peg$c11;
+            }
+            if (s4 !== peg$FAILED) {
+              s1 = [s1, s2, s3, s4];
+              s0 = s1;
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parsecomment() {
+      var s0, s1, s2, s3, s4;
+
+      s0 = peg$currPos;
+      s1 = peg$parse_();
+      if (s1 !== peg$FAILED) {
+        if (input.charCodeAt(peg$currPos) === 35) {
+          s2 = peg$c28;
+          peg$currPos++;
+        } else {
+          s2 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c29); }
+        }
+        if (s2 !== peg$FAILED) {
+          s3 = [];
+          s4 = peg$parseanychar();
+          while (s4 !== peg$FAILED) {
+            s3.push(s4);
+            s4 = peg$parseanychar();
+          }
+          if (s3 !== peg$FAILED) {
+            s1 = [s1, s2, s3];
+            s0 = s1;
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parseconnection() {
+      var s0, s1, s2, s3, s4, s5;
+
+      s0 = peg$currPos;
+      s1 = peg$parsebridge();
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parse_();
+        if (s2 !== peg$FAILED) {
+          if (input.substr(peg$currPos, 2) === peg$c30) {
+            s3 = peg$c30;
+            peg$currPos += 2;
+          } else {
+            s3 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c31); }
+          }
+          if (s3 !== peg$FAILED) {
+            s4 = peg$parse_();
+            if (s4 !== peg$FAILED) {
+              s5 = peg$parseconnection();
+              if (s5 !== peg$FAILED) {
+                peg$reportedPos = s0;
+                s1 = peg$c32(s1, s5);
+                s0 = s1;
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+      if (s0 === peg$FAILED) {
+        s0 = peg$parsebridge();
+      }
+
+      return s0;
+    }
+
+    function peg$parsebridge() {
+      var s0, s1, s2, s3, s4, s5;
+
+      s0 = peg$currPos;
+      s1 = peg$parseport();
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parse_();
+        if (s2 !== peg$FAILED) {
+          s3 = peg$parsenode();
+          if (s3 !== peg$FAILED) {
+            s4 = peg$parse_();
+            if (s4 !== peg$FAILED) {
+              s5 = peg$parseport();
+              if (s5 !== peg$FAILED) {
+                peg$reportedPos = s0;
+                s1 = peg$c33(s1, s3, s5);
+                s0 = s1;
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+      if (s0 === peg$FAILED) {
+        s0 = peg$parseiip();
+        if (s0 === peg$FAILED) {
+          s0 = peg$parserightlet();
+          if (s0 === peg$FAILED) {
+            s0 = peg$parseleftlet();
+          }
+        }
+      }
+
+      return s0;
+    }
+
+    function peg$parseleftlet() {
+      var s0, s1, s2, s3;
+
+      s0 = peg$currPos;
+      s1 = peg$parsenode();
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parse_();
+        if (s2 !== peg$FAILED) {
+          s3 = peg$parseport();
+          if (s3 !== peg$FAILED) {
+            peg$reportedPos = s0;
+            s1 = peg$c34(s1, s3);
+            s0 = s1;
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+      if (s0 === peg$FAILED) {
+        s0 = peg$currPos;
+        s1 = peg$parsenode();
+        if (s1 !== peg$FAILED) {
+          s2 = peg$parse_();
+          if (s2 !== peg$FAILED) {
+            s3 = peg$parseportWithIndex();
+            if (s3 !== peg$FAILED) {
+              peg$reportedPos = s0;
+              s1 = peg$c35(s1, s3);
+              s0 = s1;
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      }
+
+      return s0;
+    }
+
+    function peg$parseiip() {
+      var s0, s1, s2, s3;
+
+      s0 = peg$currPos;
+      if (input.charCodeAt(peg$currPos) === 39) {
+        s1 = peg$c36;
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c37); }
+      }
+      if (s1 !== peg$FAILED) {
+        s2 = [];
+        s3 = peg$parseiipchar();
+        while (s3 !== peg$FAILED) {
+          s2.push(s3);
+          s3 = peg$parseiipchar();
+        }
+        if (s2 !== peg$FAILED) {
+          if (input.charCodeAt(peg$currPos) === 39) {
+            s3 = peg$c36;
+            peg$currPos++;
+          } else {
+            s3 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c37); }
+          }
+          if (s3 !== peg$FAILED) {
+            peg$reportedPos = s0;
+            s1 = peg$c38(s2);
+            s0 = s1;
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parserightlet() {
+      var s0, s1, s2, s3;
+
+      s0 = peg$currPos;
+      s1 = peg$parseport();
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parse_();
+        if (s2 !== peg$FAILED) {
+          s3 = peg$parsenode();
+          if (s3 !== peg$FAILED) {
+            peg$reportedPos = s0;
+            s1 = peg$c39(s1, s3);
+            s0 = s1;
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+      if (s0 === peg$FAILED) {
+        s0 = peg$currPos;
+        s1 = peg$parseportWithIndex();
+        if (s1 !== peg$FAILED) {
+          s2 = peg$parse_();
+          if (s2 !== peg$FAILED) {
+            s3 = peg$parsenode();
+            if (s3 !== peg$FAILED) {
+              peg$reportedPos = s0;
+              s1 = peg$c40(s1, s3);
+              s0 = s1;
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      }
+
+      return s0;
+    }
+
+    function peg$parsenode() {
+      var s0, s1, s2;
+
+      s0 = peg$currPos;
+      s1 = [];
+      if (peg$c41.test(input.charAt(peg$currPos))) {
+        s2 = input.charAt(peg$currPos);
+        peg$currPos++;
+      } else {
+        s2 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c42); }
+      }
+      if (s2 !== peg$FAILED) {
+        while (s2 !== peg$FAILED) {
+          s1.push(s2);
+          if (peg$c41.test(input.charAt(peg$currPos))) {
+            s2 = input.charAt(peg$currPos);
+            peg$currPos++;
+          } else {
+            s2 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c42); }
+          }
+        }
+      } else {
+        s1 = peg$c2;
+      }
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parsecomponent();
+        if (s2 === peg$FAILED) {
+          s2 = peg$c11;
+        }
+        if (s2 !== peg$FAILED) {
+          peg$reportedPos = s0;
+          s1 = peg$c43(s1, s2);
+          s0 = s1;
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parsecomponent() {
+      var s0, s1, s2, s3, s4;
+
+      s0 = peg$currPos;
+      if (input.charCodeAt(peg$currPos) === 40) {
+        s1 = peg$c44;
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c45); }
+      }
+      if (s1 !== peg$FAILED) {
+        s2 = [];
+        if (peg$c46.test(input.charAt(peg$currPos))) {
+          s3 = input.charAt(peg$currPos);
+          peg$currPos++;
+        } else {
+          s3 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c47); }
+        }
+        if (s3 !== peg$FAILED) {
+          while (s3 !== peg$FAILED) {
+            s2.push(s3);
+            if (peg$c46.test(input.charAt(peg$currPos))) {
+              s3 = input.charAt(peg$currPos);
+              peg$currPos++;
+            } else {
+              s3 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c47); }
+            }
+          }
+        } else {
+          s2 = peg$c2;
+        }
+        if (s2 === peg$FAILED) {
+          s2 = peg$c11;
+        }
+        if (s2 !== peg$FAILED) {
+          s3 = peg$parsecompMeta();
+          if (s3 === peg$FAILED) {
+            s3 = peg$c11;
+          }
+          if (s3 !== peg$FAILED) {
+            if (input.charCodeAt(peg$currPos) === 41) {
+              s4 = peg$c48;
+              peg$currPos++;
+            } else {
+              s4 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c49); }
+            }
+            if (s4 !== peg$FAILED) {
+              peg$reportedPos = s0;
+              s1 = peg$c50(s2, s3);
+              s0 = s1;
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parsecompMeta() {
+      var s0, s1, s2, s3;
+
+      s0 = peg$currPos;
+      if (input.charCodeAt(peg$currPos) === 58) {
+        s1 = peg$c7;
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c8); }
+      }
+      if (s1 !== peg$FAILED) {
+        s2 = [];
+        if (peg$c51.test(input.charAt(peg$currPos))) {
+          s3 = input.charAt(peg$currPos);
+          peg$currPos++;
+        } else {
+          s3 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c52); }
+        }
+        if (s3 !== peg$FAILED) {
+          while (s3 !== peg$FAILED) {
+            s2.push(s3);
+            if (peg$c51.test(input.charAt(peg$currPos))) {
+              s3 = input.charAt(peg$currPos);
+              peg$currPos++;
+            } else {
+              s3 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c52); }
+            }
+          }
+        } else {
+          s2 = peg$c2;
+        }
+        if (s2 !== peg$FAILED) {
+          peg$reportedPos = s0;
+          s1 = peg$c53(s2);
+          s0 = s1;
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parseport() {
+      var s0, s1, s2;
+
+      s0 = peg$currPos;
+      s1 = [];
+      if (peg$c54.test(input.charAt(peg$currPos))) {
+        s2 = input.charAt(peg$currPos);
+        peg$currPos++;
+      } else {
+        s2 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c55); }
+      }
+      if (s2 !== peg$FAILED) {
+        while (s2 !== peg$FAILED) {
+          s1.push(s2);
+          if (peg$c54.test(input.charAt(peg$currPos))) {
+            s2 = input.charAt(peg$currPos);
+            peg$currPos++;
+          } else {
+            s2 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c55); }
+          }
+        }
+      } else {
+        s1 = peg$c2;
+      }
+      if (s1 !== peg$FAILED) {
+        s2 = peg$parse__();
+        if (s2 !== peg$FAILED) {
+          peg$reportedPos = s0;
+          s1 = peg$c56(s1);
+          s0 = s1;
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parseportWithIndex() {
+      var s0, s1, s2, s3, s4, s5;
+
+      s0 = peg$currPos;
+      s1 = [];
+      if (peg$c54.test(input.charAt(peg$currPos))) {
+        s2 = input.charAt(peg$currPos);
+        peg$currPos++;
+      } else {
+        s2 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c55); }
+      }
+      if (s2 !== peg$FAILED) {
+        while (s2 !== peg$FAILED) {
+          s1.push(s2);
+          if (peg$c54.test(input.charAt(peg$currPos))) {
+            s2 = input.charAt(peg$currPos);
+            peg$currPos++;
+          } else {
+            s2 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c55); }
+          }
+        }
+      } else {
+        s1 = peg$c2;
+      }
+      if (s1 !== peg$FAILED) {
+        if (input.charCodeAt(peg$currPos) === 91) {
+          s2 = peg$c57;
+          peg$currPos++;
+        } else {
+          s2 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c58); }
+        }
+        if (s2 !== peg$FAILED) {
+          s3 = [];
+          if (peg$c59.test(input.charAt(peg$currPos))) {
+            s4 = input.charAt(peg$currPos);
+            peg$currPos++;
+          } else {
+            s4 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c60); }
+          }
+          if (s4 !== peg$FAILED) {
+            while (s4 !== peg$FAILED) {
+              s3.push(s4);
+              if (peg$c59.test(input.charAt(peg$currPos))) {
+                s4 = input.charAt(peg$currPos);
+                peg$currPos++;
+              } else {
+                s4 = peg$FAILED;
+                if (peg$silentFails === 0) { peg$fail(peg$c60); }
+              }
+            }
+          } else {
+            s3 = peg$c2;
+          }
+          if (s3 !== peg$FAILED) {
+            if (input.charCodeAt(peg$currPos) === 93) {
+              s4 = peg$c61;
+              peg$currPos++;
+            } else {
+              s4 = peg$FAILED;
+              if (peg$silentFails === 0) { peg$fail(peg$c62); }
+            }
+            if (s4 !== peg$FAILED) {
+              s5 = peg$parse__();
+              if (s5 !== peg$FAILED) {
+                peg$reportedPos = s0;
+                s1 = peg$c63(s1, s3);
+                s0 = s1;
+              } else {
+                peg$currPos = s0;
+                s0 = peg$c2;
+              }
+            } else {
+              peg$currPos = s0;
+              s0 = peg$c2;
+            }
+          } else {
+            peg$currPos = s0;
+            s0 = peg$c2;
+          }
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+    function peg$parseanychar() {
+      var s0;
+
+      if (peg$c64.test(input.charAt(peg$currPos))) {
+        s0 = input.charAt(peg$currPos);
+        peg$currPos++;
+      } else {
+        s0 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c65); }
+      }
+
+      return s0;
+    }
+
+    function peg$parseiipchar() {
+      var s0, s1, s2;
+
+      s0 = peg$currPos;
+      if (peg$c66.test(input.charAt(peg$currPos))) {
+        s1 = input.charAt(peg$currPos);
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c67); }
+      }
+      if (s1 !== peg$FAILED) {
+        if (peg$c68.test(input.charAt(peg$currPos))) {
+          s2 = input.charAt(peg$currPos);
+          peg$currPos++;
+        } else {
+          s2 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c69); }
+        }
+        if (s2 !== peg$FAILED) {
+          peg$reportedPos = s0;
+          s1 = peg$c70();
+          s0 = s1;
+        } else {
+          peg$currPos = s0;
+          s0 = peg$c2;
+        }
+      } else {
+        peg$currPos = s0;
+        s0 = peg$c2;
+      }
+      if (s0 === peg$FAILED) {
+        if (peg$c71.test(input.charAt(peg$currPos))) {
+          s0 = input.charAt(peg$currPos);
+          peg$currPos++;
+        } else {
+          s0 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c72); }
+        }
+      }
+
+      return s0;
+    }
+
+    function peg$parse_() {
+      var s0, s1;
+
+      s0 = [];
+      if (input.charCodeAt(peg$currPos) === 32) {
+        s1 = peg$c73;
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c74); }
+      }
+      while (s1 !== peg$FAILED) {
+        s0.push(s1);
+        if (input.charCodeAt(peg$currPos) === 32) {
+          s1 = peg$c73;
+          peg$currPos++;
+        } else {
+          s1 = peg$FAILED;
+          if (peg$silentFails === 0) { peg$fail(peg$c74); }
+        }
+      }
+      if (s0 === peg$FAILED) {
+        s0 = peg$c11;
+      }
+
+      return s0;
+    }
+
+    function peg$parse__() {
+      var s0, s1;
+
+      s0 = [];
+      if (input.charCodeAt(peg$currPos) === 32) {
+        s1 = peg$c73;
+        peg$currPos++;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c74); }
+      }
+      if (s1 !== peg$FAILED) {
+        while (s1 !== peg$FAILED) {
+          s0.push(s1);
+          if (input.charCodeAt(peg$currPos) === 32) {
+            s1 = peg$c73;
+            peg$currPos++;
+          } else {
+            s1 = peg$FAILED;
+            if (peg$silentFails === 0) { peg$fail(peg$c74); }
+          }
+        }
+      } else {
+        s0 = peg$c2;
+      }
+
+      return s0;
+    }
+
+
+      var parser, edges, nodes; 
+
+      parser = this;
+      delete parser.exports;
+      delete parser.inports;
+      delete parser.outports;
+
+      edges = parser.edges = [];
+
+      nodes = {};
+
+      parser.addNode = function (nodeName, comp) {
+        if (!nodes[nodeName]) {
+          nodes[nodeName] = {}
+        }
+        if (!!comp.comp) {
+          nodes[nodeName].component = comp.comp;
+        }
+        if (!!comp.meta) {
+          var metadata = {};
+          for (var i = 0; i < comp.meta.length; i++) {
+            var item = comp.meta[i].split('=');
+            if (item.length === 1) {
+              item = ['routes', item[0]];
+            }
+            var key = item[0];
+            var value = item[1];
+            if (key==='x' || key==='y') {
+              value = parseFloat(value);
+            }
+            metadata[key] = value;
+          }
+          nodes[nodeName].metadata=metadata;
+        }
+       
+      }
+
+      parser.getResult = function () {
+        return {processes:nodes, connections:parser.processEdges(), exports:parser.exports, inports: parser.inports, outports: parser.outports};
+      }  
+
+      var flatten = function (array, isShallow) {
+        var index = -1,
+          length = array ? array.length : 0,
+          result = [];
+
+        while (++index < length) {
+          var value = array[index];
+
+          if (value instanceof Array) {
+            Array.prototype.push.apply(result, isShallow ? value : flatten(value));
+          }
+          else {
+            result.push(value);
+          }
+        }
         return result;
       }
       
-      function escape(ch) {
-        var charCode = ch.charCodeAt(0);
-        var escapeChar;
-        var length;
-        
-        if (charCode <= 0xFF) {
-          escapeChar = 'x';
-          length = 2;
-        } else {
-          escapeChar = 'u';
-          length = 4;
+      parser.registerExports = function (priv, pub) {
+        if (!parser.exports) {
+          parser.exports = [];
         }
-        
-        return '\\' + escapeChar + padLeft(charCode.toString(16).toUpperCase(), '0', length);
+        parser.exports.push({private:priv.toLowerCase(), public:pub.toLowerCase()})
       }
-      
-      function matchFailed(failure) {
-        if (pos < rightmostFailuresPos) {
-          return;
+      parser.registerInports = function (node, port, pub) {
+        if (!parser.inports) {
+          parser.inports = {};
         }
-        
-        if (pos > rightmostFailuresPos) {
-          rightmostFailuresPos = pos;
-          rightmostFailuresExpected = [];
-        }
-        
-        rightmostFailuresExpected.push(failure);
+        parser.inports[pub.toLowerCase()] = {process:node, port:port.toLowerCase()}
       }
-      
-      function parse_start() {
-        var result0, result1;
-        var pos0;
-        
-        pos0 = pos;
-        result0 = [];
-        result1 = parse_line();
-        while (result1 !== null) {
-          result0.push(result1);
-          result1 = parse_line();
+      parser.registerOutports = function (node, port, pub) {
+        if (!parser.outports) {
+          parser.outports = {};
         }
-        if (result0 !== null) {
-          result0 = (function(offset) { return parser.getResult();  })(pos0);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
+        parser.outports[pub.toLowerCase()] = {process:node, port:port.toLowerCase()}
       }
-      
-      function parse_line() {
-        var result0, result1, result2, result3, result4, result5, result6, result7, result8;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        result0 = parse__();
-        if (result0 !== null) {
-          if (input.substr(pos, 7) === "EXPORT=") {
-            result1 = "EXPORT=";
-            pos += 7;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("\"EXPORT=\"");
-            }
+
+      parser.registerEdges = function (edges) {
+
+        edges.forEach(function (o, i) {
+          parser.edges.push(o);
+        });
+      }  
+
+      parser.processEdges = function () {   
+        var flats, grouped;
+        flats = flatten(parser.edges);
+        grouped = [];
+        var current = {};
+        flats.forEach(function (o, i) {
+          if (i % 2 !== 0) { 
+            var pair = grouped[grouped.length - 1];
+            pair.tgt = o.tgt;
+            return;
           }
-          if (result1 !== null) {
-            if (/^[A-Za-z.0-9_]/.test(input.charAt(pos))) {
-              result3 = input.charAt(pos);
-              pos++;
-            } else {
-              result3 = null;
-              if (reportFailures === 0) {
-                matchFailed("[A-Za-z.0-9_]");
-              }
-            }
-            if (result3 !== null) {
-              result2 = [];
-              while (result3 !== null) {
-                result2.push(result3);
-                if (/^[A-Za-z.0-9_]/.test(input.charAt(pos))) {
-                  result3 = input.charAt(pos);
-                  pos++;
-                } else {
-                  result3 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("[A-Za-z.0-9_]");
-                  }
-                }
-              }
-            } else {
-              result2 = null;
-            }
-            if (result2 !== null) {
-              if (input.charCodeAt(pos) === 58) {
-                result3 = ":";
-                pos++;
-              } else {
-                result3 = null;
-                if (reportFailures === 0) {
-                  matchFailed("\":\"");
-                }
-              }
-              if (result3 !== null) {
-                if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                  result5 = input.charAt(pos);
-                  pos++;
-                } else {
-                  result5 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("[A-Z0-9_]");
-                  }
-                }
-                if (result5 !== null) {
-                  result4 = [];
-                  while (result5 !== null) {
-                    result4.push(result5);
-                    if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                      result5 = input.charAt(pos);
-                      pos++;
-                    } else {
-                      result5 = null;
-                      if (reportFailures === 0) {
-                        matchFailed("[A-Z0-9_]");
-                      }
-                    }
-                  }
-                } else {
-                  result4 = null;
-                }
-                if (result4 !== null) {
-                  result5 = parse__();
-                  if (result5 !== null) {
-                    result6 = parse_LineTerminator();
-                    result6 = result6 !== null ? result6 : "";
-                    if (result6 !== null) {
-                      result0 = [result0, result1, result2, result3, result4, result5, result6];
-                    } else {
-                      result0 = null;
-                      pos = pos1;
-                    }
-                  } else {
-                    result0 = null;
-                    pos = pos1;
-                  }
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, priv, pub) {return parser.registerExports(priv.join(""),pub.join(""))})(pos0, result0[2], result0[4]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          pos0 = pos;
-          pos1 = pos;
-          result0 = parse__();
-          if (result0 !== null) {
-            if (input.substr(pos, 7) === "INPORT=") {
-              result1 = "INPORT=";
-              pos += 7;
-            } else {
-              result1 = null;
-              if (reportFailures === 0) {
-                matchFailed("\"INPORT=\"");
-              }
-            }
-            if (result1 !== null) {
-              if (/^[A-Za-z0-9_]/.test(input.charAt(pos))) {
-                result3 = input.charAt(pos);
-                pos++;
-              } else {
-                result3 = null;
-                if (reportFailures === 0) {
-                  matchFailed("[A-Za-z0-9_]");
-                }
-              }
-              if (result3 !== null) {
-                result2 = [];
-                while (result3 !== null) {
-                  result2.push(result3);
-                  if (/^[A-Za-z0-9_]/.test(input.charAt(pos))) {
-                    result3 = input.charAt(pos);
-                    pos++;
-                  } else {
-                    result3 = null;
-                    if (reportFailures === 0) {
-                      matchFailed("[A-Za-z0-9_]");
-                    }
-                  }
-                }
-              } else {
-                result2 = null;
-              }
-              if (result2 !== null) {
-                if (input.charCodeAt(pos) === 46) {
-                  result3 = ".";
-                  pos++;
-                } else {
-                  result3 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("\".\"");
-                  }
-                }
-                if (result3 !== null) {
-                  if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                    result5 = input.charAt(pos);
-                    pos++;
-                  } else {
-                    result5 = null;
-                    if (reportFailures === 0) {
-                      matchFailed("[A-Z0-9_]");
-                    }
-                  }
-                  if (result5 !== null) {
-                    result4 = [];
-                    while (result5 !== null) {
-                      result4.push(result5);
-                      if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                        result5 = input.charAt(pos);
-                        pos++;
-                      } else {
-                        result5 = null;
-                        if (reportFailures === 0) {
-                          matchFailed("[A-Z0-9_]");
-                        }
-                      }
-                    }
-                  } else {
-                    result4 = null;
-                  }
-                  if (result4 !== null) {
-                    if (input.charCodeAt(pos) === 58) {
-                      result5 = ":";
-                      pos++;
-                    } else {
-                      result5 = null;
-                      if (reportFailures === 0) {
-                        matchFailed("\":\"");
-                      }
-                    }
-                    if (result5 !== null) {
-                      if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                        result7 = input.charAt(pos);
-                        pos++;
-                      } else {
-                        result7 = null;
-                        if (reportFailures === 0) {
-                          matchFailed("[A-Z0-9_]");
-                        }
-                      }
-                      if (result7 !== null) {
-                        result6 = [];
-                        while (result7 !== null) {
-                          result6.push(result7);
-                          if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                            result7 = input.charAt(pos);
-                            pos++;
-                          } else {
-                            result7 = null;
-                            if (reportFailures === 0) {
-                              matchFailed("[A-Z0-9_]");
-                            }
-                          }
-                        }
-                      } else {
-                        result6 = null;
-                      }
-                      if (result6 !== null) {
-                        result7 = parse__();
-                        if (result7 !== null) {
-                          result8 = parse_LineTerminator();
-                          result8 = result8 !== null ? result8 : "";
-                          if (result8 !== null) {
-                            result0 = [result0, result1, result2, result3, result4, result5, result6, result7, result8];
-                          } else {
-                            result0 = null;
-                            pos = pos1;
-                          }
-                        } else {
-                          result0 = null;
-                          pos = pos1;
-                        }
-                      } else {
-                        result0 = null;
-                        pos = pos1;
-                      }
-                    } else {
-                      result0 = null;
-                      pos = pos1;
-                    }
-                  } else {
-                    result0 = null;
-                    pos = pos1;
-                  }
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-          if (result0 !== null) {
-            result0 = (function(offset, node, port, pub) {return parser.registerInports(node.join(""),port.join(""),pub.join(""))})(pos0, result0[2], result0[4], result0[6]);
-          }
-          if (result0 === null) {
-            pos = pos0;
-          }
-          if (result0 === null) {
-            pos0 = pos;
-            pos1 = pos;
-            result0 = parse__();
-            if (result0 !== null) {
-              if (input.substr(pos, 8) === "OUTPORT=") {
-                result1 = "OUTPORT=";
-                pos += 8;
-              } else {
-                result1 = null;
-                if (reportFailures === 0) {
-                  matchFailed("\"OUTPORT=\"");
-                }
-              }
-              if (result1 !== null) {
-                if (/^[A-Za-z0-9_]/.test(input.charAt(pos))) {
-                  result3 = input.charAt(pos);
-                  pos++;
-                } else {
-                  result3 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("[A-Za-z0-9_]");
-                  }
-                }
-                if (result3 !== null) {
-                  result2 = [];
-                  while (result3 !== null) {
-                    result2.push(result3);
-                    if (/^[A-Za-z0-9_]/.test(input.charAt(pos))) {
-                      result3 = input.charAt(pos);
-                      pos++;
-                    } else {
-                      result3 = null;
-                      if (reportFailures === 0) {
-                        matchFailed("[A-Za-z0-9_]");
-                      }
-                    }
-                  }
-                } else {
-                  result2 = null;
-                }
-                if (result2 !== null) {
-                  if (input.charCodeAt(pos) === 46) {
-                    result3 = ".";
-                    pos++;
-                  } else {
-                    result3 = null;
-                    if (reportFailures === 0) {
-                      matchFailed("\".\"");
-                    }
-                  }
-                  if (result3 !== null) {
-                    if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                      result5 = input.charAt(pos);
-                      pos++;
-                    } else {
-                      result5 = null;
-                      if (reportFailures === 0) {
-                        matchFailed("[A-Z0-9_]");
-                      }
-                    }
-                    if (result5 !== null) {
-                      result4 = [];
-                      while (result5 !== null) {
-                        result4.push(result5);
-                        if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                          result5 = input.charAt(pos);
-                          pos++;
-                        } else {
-                          result5 = null;
-                          if (reportFailures === 0) {
-                            matchFailed("[A-Z0-9_]");
-                          }
-                        }
-                      }
-                    } else {
-                      result4 = null;
-                    }
-                    if (result4 !== null) {
-                      if (input.charCodeAt(pos) === 58) {
-                        result5 = ":";
-                        pos++;
-                      } else {
-                        result5 = null;
-                        if (reportFailures === 0) {
-                          matchFailed("\":\"");
-                        }
-                      }
-                      if (result5 !== null) {
-                        if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                          result7 = input.charAt(pos);
-                          pos++;
-                        } else {
-                          result7 = null;
-                          if (reportFailures === 0) {
-                            matchFailed("[A-Z0-9_]");
-                          }
-                        }
-                        if (result7 !== null) {
-                          result6 = [];
-                          while (result7 !== null) {
-                            result6.push(result7);
-                            if (/^[A-Z0-9_]/.test(input.charAt(pos))) {
-                              result7 = input.charAt(pos);
-                              pos++;
-                            } else {
-                              result7 = null;
-                              if (reportFailures === 0) {
-                                matchFailed("[A-Z0-9_]");
-                              }
-                            }
-                          }
-                        } else {
-                          result6 = null;
-                        }
-                        if (result6 !== null) {
-                          result7 = parse__();
-                          if (result7 !== null) {
-                            result8 = parse_LineTerminator();
-                            result8 = result8 !== null ? result8 : "";
-                            if (result8 !== null) {
-                              result0 = [result0, result1, result2, result3, result4, result5, result6, result7, result8];
-                            } else {
-                              result0 = null;
-                              pos = pos1;
-                            }
-                          } else {
-                            result0 = null;
-                            pos = pos1;
-                          }
-                        } else {
-                          result0 = null;
-                          pos = pos1;
-                        }
-                      } else {
-                        result0 = null;
-                        pos = pos1;
-                      }
-                    } else {
-                      result0 = null;
-                      pos = pos1;
-                    }
-                  } else {
-                    result0 = null;
-                    pos = pos1;
-                  }
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-            if (result0 !== null) {
-              result0 = (function(offset, node, port, pub) {return parser.registerOutports(node.join(""),port.join(""),pub.join(""))})(pos0, result0[2], result0[4], result0[6]);
-            }
-            if (result0 === null) {
-              pos = pos0;
-            }
-            if (result0 === null) {
-              pos0 = pos;
-              result0 = parse_comment();
-              if (result0 !== null) {
-                if (/^[\n\r\u2028\u2029]/.test(input.charAt(pos))) {
-                  result1 = input.charAt(pos);
-                  pos++;
-                } else {
-                  result1 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("[\\n\\r\\u2028\\u2029]");
-                  }
-                }
-                result1 = result1 !== null ? result1 : "";
-                if (result1 !== null) {
-                  result0 = [result0, result1];
-                } else {
-                  result0 = null;
-                  pos = pos0;
-                }
-              } else {
-                result0 = null;
-                pos = pos0;
-              }
-              if (result0 === null) {
-                pos0 = pos;
-                result0 = parse__();
-                if (result0 !== null) {
-                  if (/^[\n\r\u2028\u2029]/.test(input.charAt(pos))) {
-                    result1 = input.charAt(pos);
-                    pos++;
-                  } else {
-                    result1 = null;
-                    if (reportFailures === 0) {
-                      matchFailed("[\\n\\r\\u2028\\u2029]");
-                    }
-                  }
-                  if (result1 !== null) {
-                    result0 = [result0, result1];
-                  } else {
-                    result0 = null;
-                    pos = pos0;
-                  }
-                } else {
-                  result0 = null;
-                  pos = pos0;
-                }
-                if (result0 === null) {
-                  pos0 = pos;
-                  pos1 = pos;
-                  result0 = parse__();
-                  if (result0 !== null) {
-                    result1 = parse_connection();
-                    if (result1 !== null) {
-                      result2 = parse__();
-                      if (result2 !== null) {
-                        result3 = parse_LineTerminator();
-                        result3 = result3 !== null ? result3 : "";
-                        if (result3 !== null) {
-                          result0 = [result0, result1, result2, result3];
-                        } else {
-                          result0 = null;
-                          pos = pos1;
-                        }
-                      } else {
-                        result0 = null;
-                        pos = pos1;
-                      }
-                    } else {
-                      result0 = null;
-                      pos = pos1;
-                    }
-                  } else {
-                    result0 = null;
-                    pos = pos1;
-                  }
-                  if (result0 !== null) {
-                    result0 = (function(offset, edges) {return parser.registerEdges(edges);})(pos0, result0[1]);
-                  }
-                  if (result0 === null) {
-                    pos = pos0;
-                  }
-                }
-              }
-            }
-          }
-        }
-        return result0;
+          grouped.push(o);
+        });
+        return grouped;
       }
-      
-      function parse_LineTerminator() {
-        var result0, result1, result2, result3;
-        var pos0;
-        
-        pos0 = pos;
-        result0 = parse__();
-        if (result0 !== null) {
-          if (input.charCodeAt(pos) === 44) {
-            result1 = ",";
-            pos++;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("\",\"");
-            }
-          }
-          result1 = result1 !== null ? result1 : "";
-          if (result1 !== null) {
-            result2 = parse_comment();
-            result2 = result2 !== null ? result2 : "";
-            if (result2 !== null) {
-              if (/^[\n\r\u2028\u2029]/.test(input.charAt(pos))) {
-                result3 = input.charAt(pos);
-                pos++;
-              } else {
-                result3 = null;
-                if (reportFailures === 0) {
-                  matchFailed("[\\n\\r\\u2028\\u2029]");
-                }
-              }
-              result3 = result3 !== null ? result3 : "";
-              if (result3 !== null) {
-                result0 = [result0, result1, result2, result3];
-              } else {
-                result0 = null;
-                pos = pos0;
-              }
-            } else {
-              result0 = null;
-              pos = pos0;
-            }
-          } else {
-            result0 = null;
-            pos = pos0;
-          }
-        } else {
-          result0 = null;
-          pos = pos0;
-        }
-        return result0;
+
+
+    peg$result = peg$startRuleFunction();
+
+    if (peg$result !== peg$FAILED && peg$currPos === input.length) {
+      return peg$result;
+    } else {
+      if (peg$result !== peg$FAILED && peg$currPos < input.length) {
+        peg$fail({ type: "end", description: "end of input" });
       }
-      
-      function parse_comment() {
-        var result0, result1, result2, result3;
-        var pos0;
-        
-        pos0 = pos;
-        result0 = parse__();
-        if (result0 !== null) {
-          if (input.charCodeAt(pos) === 35) {
-            result1 = "#";
-            pos++;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("\"#\"");
-            }
-          }
-          if (result1 !== null) {
-            result2 = [];
-            result3 = parse_anychar();
-            while (result3 !== null) {
-              result2.push(result3);
-              result3 = parse_anychar();
-            }
-            if (result2 !== null) {
-              result0 = [result0, result1, result2];
-            } else {
-              result0 = null;
-              pos = pos0;
-            }
-          } else {
-            result0 = null;
-            pos = pos0;
-          }
-        } else {
-          result0 = null;
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_connection() {
-        var result0, result1, result2, result3, result4;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        result0 = parse_bridge();
-        if (result0 !== null) {
-          result1 = parse__();
-          if (result1 !== null) {
-            if (input.substr(pos, 2) === "->") {
-              result2 = "->";
-              pos += 2;
-            } else {
-              result2 = null;
-              if (reportFailures === 0) {
-                matchFailed("\"->\"");
-              }
-            }
-            if (result2 !== null) {
-              result3 = parse__();
-              if (result3 !== null) {
-                result4 = parse_connection();
-                if (result4 !== null) {
-                  result0 = [result0, result1, result2, result3, result4];
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, x, y) { return [x,y]; })(pos0, result0[0], result0[4]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          result0 = parse_bridge();
-        }
-        return result0;
-      }
-      
-      function parse_bridge() {
-        var result0, result1, result2, result3, result4;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        result0 = parse_port();
-        if (result0 !== null) {
-          result1 = parse__();
-          if (result1 !== null) {
-            result2 = parse_node();
-            if (result2 !== null) {
-              result3 = parse__();
-              if (result3 !== null) {
-                result4 = parse_port();
-                if (result4 !== null) {
-                  result0 = [result0, result1, result2, result3, result4];
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, x, proc, y) { return [{"tgt":{process:proc, port:x}},{"src":{process:proc, port:y}}]; })(pos0, result0[0], result0[2], result0[4]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          result0 = parse_iip();
-          if (result0 === null) {
-            result0 = parse_rightlet();
-            if (result0 === null) {
-              result0 = parse_leftlet();
-            }
-          }
-        }
-        return result0;
-      }
-      
-      function parse_leftlet() {
-        var result0, result1, result2;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        result0 = parse_node();
-        if (result0 !== null) {
-          result1 = parse__();
-          if (result1 !== null) {
-            result2 = parse_port();
-            if (result2 !== null) {
-              result0 = [result0, result1, result2];
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, proc, port) { return {"src":{process:proc, port:port}} })(pos0, result0[0], result0[2]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          pos0 = pos;
-          pos1 = pos;
-          result0 = parse_node();
-          if (result0 !== null) {
-            result1 = parse__();
-            if (result1 !== null) {
-              result2 = parse_portWithIndex();
-              if (result2 !== null) {
-                result0 = [result0, result1, result2];
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-          if (result0 !== null) {
-            result0 = (function(offset, proc, port) { return {"src":{process:proc, port:port.port, index: port.index}} })(pos0, result0[0], result0[2]);
-          }
-          if (result0 === null) {
-            pos = pos0;
-          }
-        }
-        return result0;
-      }
-      
-      function parse_iip() {
-        var result0, result1, result2;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (input.charCodeAt(pos) === 39) {
-          result0 = "'";
-          pos++;
-        } else {
-          result0 = null;
-          if (reportFailures === 0) {
-            matchFailed("\"'\"");
-          }
-        }
-        if (result0 !== null) {
-          result1 = [];
-          result2 = parse_iipchar();
-          while (result2 !== null) {
-            result1.push(result2);
-            result2 = parse_iipchar();
-          }
-          if (result1 !== null) {
-            if (input.charCodeAt(pos) === 39) {
-              result2 = "'";
-              pos++;
-            } else {
-              result2 = null;
-              if (reportFailures === 0) {
-                matchFailed("\"'\"");
-              }
-            }
-            if (result2 !== null) {
-              result0 = [result0, result1, result2];
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, iip) { return {"data":iip.join("")} })(pos0, result0[1]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_rightlet() {
-        var result0, result1, result2;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        result0 = parse_port();
-        if (result0 !== null) {
-          result1 = parse__();
-          if (result1 !== null) {
-            result2 = parse_node();
-            if (result2 !== null) {
-              result0 = [result0, result1, result2];
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, port, proc) { return {"tgt":{process:proc, port:port}} })(pos0, result0[0], result0[2]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          pos0 = pos;
-          pos1 = pos;
-          result0 = parse_portWithIndex();
-          if (result0 !== null) {
-            result1 = parse__();
-            if (result1 !== null) {
-              result2 = parse_node();
-              if (result2 !== null) {
-                result0 = [result0, result1, result2];
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-          if (result0 !== null) {
-            result0 = (function(offset, port, proc) { return {"tgt":{process:proc, port:port.port, index: port.index}} })(pos0, result0[0], result0[2]);
-          }
-          if (result0 === null) {
-            pos = pos0;
-          }
-        }
-        return result0;
-      }
-      
-      function parse_node() {
-        var result0, result1;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (/^[a-zA-Z0-9_]/.test(input.charAt(pos))) {
-          result1 = input.charAt(pos);
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("[a-zA-Z0-9_]");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (/^[a-zA-Z0-9_]/.test(input.charAt(pos))) {
-              result1 = input.charAt(pos);
-              pos++;
-            } else {
-              result1 = null;
-              if (reportFailures === 0) {
-                matchFailed("[a-zA-Z0-9_]");
-              }
-            }
-          }
-        } else {
-          result0 = null;
-        }
-        if (result0 !== null) {
-          result1 = parse_component();
-          result1 = result1 !== null ? result1 : "";
-          if (result1 !== null) {
-            result0 = [result0, result1];
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, node, comp) { if(comp){parser.addNode(node.join(""),comp);}; return node.join("")})(pos0, result0[0], result0[1]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_component() {
-        var result0, result1, result2, result3;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (input.charCodeAt(pos) === 40) {
-          result0 = "(";
-          pos++;
-        } else {
-          result0 = null;
-          if (reportFailures === 0) {
-            matchFailed("\"(\"");
-          }
-        }
-        if (result0 !== null) {
-          if (/^[a-zA-Z\/\-0-9_]/.test(input.charAt(pos))) {
-            result2 = input.charAt(pos);
-            pos++;
-          } else {
-            result2 = null;
-            if (reportFailures === 0) {
-              matchFailed("[a-zA-Z\\/\\-0-9_]");
-            }
-          }
-          if (result2 !== null) {
-            result1 = [];
-            while (result2 !== null) {
-              result1.push(result2);
-              if (/^[a-zA-Z\/\-0-9_]/.test(input.charAt(pos))) {
-                result2 = input.charAt(pos);
-                pos++;
-              } else {
-                result2 = null;
-                if (reportFailures === 0) {
-                  matchFailed("[a-zA-Z\\/\\-0-9_]");
-                }
-              }
-            }
-          } else {
-            result1 = null;
-          }
-          result1 = result1 !== null ? result1 : "";
-          if (result1 !== null) {
-            result2 = parse_compMeta();
-            result2 = result2 !== null ? result2 : "";
-            if (result2 !== null) {
-              if (input.charCodeAt(pos) === 41) {
-                result3 = ")";
-                pos++;
-              } else {
-                result3 = null;
-                if (reportFailures === 0) {
-                  matchFailed("\")\"");
-                }
-              }
-              if (result3 !== null) {
-                result0 = [result0, result1, result2, result3];
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, comp, meta) { var o = {}; comp ? o.comp = comp.join("") : o.comp = ''; meta ? o.meta = meta.join("").split(',') : null; return o; })(pos0, result0[1], result0[2]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_compMeta() {
-        var result0, result1, result2;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (input.charCodeAt(pos) === 58) {
-          result0 = ":";
-          pos++;
-        } else {
-          result0 = null;
-          if (reportFailures === 0) {
-            matchFailed("\":\"");
-          }
-        }
-        if (result0 !== null) {
-          if (/^[a-zA-Z\/=_,0-9]/.test(input.charAt(pos))) {
-            result2 = input.charAt(pos);
-            pos++;
-          } else {
-            result2 = null;
-            if (reportFailures === 0) {
-              matchFailed("[a-zA-Z\\/=_,0-9]");
-            }
-          }
-          if (result2 !== null) {
-            result1 = [];
-            while (result2 !== null) {
-              result1.push(result2);
-              if (/^[a-zA-Z\/=_,0-9]/.test(input.charAt(pos))) {
-                result2 = input.charAt(pos);
-                pos++;
-              } else {
-                result2 = null;
-                if (reportFailures === 0) {
-                  matchFailed("[a-zA-Z\\/=_,0-9]");
-                }
-              }
-            }
-          } else {
-            result1 = null;
-          }
-          if (result1 !== null) {
-            result0 = [result0, result1];
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, meta) {return meta})(pos0, result0[1]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_port() {
-        var result0, result1;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (/^[A-Z.0-9_]/.test(input.charAt(pos))) {
-          result1 = input.charAt(pos);
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("[A-Z.0-9_]");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (/^[A-Z.0-9_]/.test(input.charAt(pos))) {
-              result1 = input.charAt(pos);
-              pos++;
-            } else {
-              result1 = null;
-              if (reportFailures === 0) {
-                matchFailed("[A-Z.0-9_]");
-              }
-            }
-          }
-        } else {
-          result0 = null;
-        }
-        if (result0 !== null) {
-          result1 = parse___();
-          if (result1 !== null) {
-            result0 = [result0, result1];
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, portname) {return portname.join("").toLowerCase()})(pos0, result0[0]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_portWithIndex() {
-        var result0, result1, result2, result3, result4;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (/^[A-Z.0-9_]/.test(input.charAt(pos))) {
-          result1 = input.charAt(pos);
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("[A-Z.0-9_]");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (/^[A-Z.0-9_]/.test(input.charAt(pos))) {
-              result1 = input.charAt(pos);
-              pos++;
-            } else {
-              result1 = null;
-              if (reportFailures === 0) {
-                matchFailed("[A-Z.0-9_]");
-              }
-            }
-          }
-        } else {
-          result0 = null;
-        }
-        if (result0 !== null) {
-          if (input.charCodeAt(pos) === 91) {
-            result1 = "[";
-            pos++;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("\"[\"");
-            }
-          }
-          if (result1 !== null) {
-            if (/^[0-9]/.test(input.charAt(pos))) {
-              result3 = input.charAt(pos);
-              pos++;
-            } else {
-              result3 = null;
-              if (reportFailures === 0) {
-                matchFailed("[0-9]");
-              }
-            }
-            if (result3 !== null) {
-              result2 = [];
-              while (result3 !== null) {
-                result2.push(result3);
-                if (/^[0-9]/.test(input.charAt(pos))) {
-                  result3 = input.charAt(pos);
-                  pos++;
-                } else {
-                  result3 = null;
-                  if (reportFailures === 0) {
-                    matchFailed("[0-9]");
-                  }
-                }
-              }
-            } else {
-              result2 = null;
-            }
-            if (result2 !== null) {
-              if (input.charCodeAt(pos) === 93) {
-                result3 = "]";
-                pos++;
-              } else {
-                result3 = null;
-                if (reportFailures === 0) {
-                  matchFailed("\"]\"");
-                }
-              }
-              if (result3 !== null) {
-                result4 = parse___();
-                if (result4 !== null) {
-                  result0 = [result0, result1, result2, result3, result4];
-                } else {
-                  result0 = null;
-                  pos = pos1;
-                }
-              } else {
-                result0 = null;
-                pos = pos1;
-              }
-            } else {
-              result0 = null;
-              pos = pos1;
-            }
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset, portname, portindex) {return { port: portname.join("").toLowerCase(), index: parseInt(portindex.join('')) }})(pos0, result0[0], result0[2]);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        return result0;
-      }
-      
-      function parse_anychar() {
-        var result0;
-        
-        if (/^[^\n\r\u2028\u2029]/.test(input.charAt(pos))) {
-          result0 = input.charAt(pos);
-          pos++;
-        } else {
-          result0 = null;
-          if (reportFailures === 0) {
-            matchFailed("[^\\n\\r\\u2028\\u2029]");
-          }
-        }
-        return result0;
-      }
-      
-      function parse_iipchar() {
-        var result0, result1;
-        var pos0, pos1;
-        
-        pos0 = pos;
-        pos1 = pos;
-        if (/^[\\]/.test(input.charAt(pos))) {
-          result0 = input.charAt(pos);
-          pos++;
-        } else {
-          result0 = null;
-          if (reportFailures === 0) {
-            matchFailed("[\\\\]");
-          }
-        }
-        if (result0 !== null) {
-          if (/^[']/.test(input.charAt(pos))) {
-            result1 = input.charAt(pos);
-            pos++;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("[']");
-            }
-          }
-          if (result1 !== null) {
-            result0 = [result0, result1];
-          } else {
-            result0 = null;
-            pos = pos1;
-          }
-        } else {
-          result0 = null;
-          pos = pos1;
-        }
-        if (result0 !== null) {
-          result0 = (function(offset) { return "'"; })(pos0);
-        }
-        if (result0 === null) {
-          pos = pos0;
-        }
-        if (result0 === null) {
-          if (/^[^']/.test(input.charAt(pos))) {
-            result0 = input.charAt(pos);
-            pos++;
-          } else {
-            result0 = null;
-            if (reportFailures === 0) {
-              matchFailed("[^']");
-            }
-          }
-        }
-        return result0;
-      }
-      
-      function parse__() {
-        var result0, result1;
-        
-        result0 = [];
-        if (input.charCodeAt(pos) === 32) {
-          result1 = " ";
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("\" \"");
-          }
-        }
-        while (result1 !== null) {
-          result0.push(result1);
-          if (input.charCodeAt(pos) === 32) {
-            result1 = " ";
-            pos++;
-          } else {
-            result1 = null;
-            if (reportFailures === 0) {
-              matchFailed("\" \"");
-            }
-          }
-        }
-        result0 = result0 !== null ? result0 : "";
-        return result0;
-      }
-      
-      function parse___() {
-        var result0, result1;
-        
-        if (input.charCodeAt(pos) === 32) {
-          result1 = " ";
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("\" \"");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (input.charCodeAt(pos) === 32) {
-              result1 = " ";
-              pos++;
-            } else {
-              result1 = null;
-              if (reportFailures === 0) {
-                matchFailed("\" \"");
-              }
-            }
-          }
-        } else {
-          result0 = null;
-        }
-        return result0;
-      }
-      
-      
-      function cleanupExpected(expected) {
-        expected.sort();
-        
-        var lastExpected = null;
-        var cleanExpected = [];
-        for (var i = 0; i < expected.length; i++) {
-          if (expected[i] !== lastExpected) {
-            cleanExpected.push(expected[i]);
-            lastExpected = expected[i];
-          }
-        }
-        return cleanExpected;
-      }
-      
-      function computeErrorPosition() {
-        /*
-         * The first idea was to use |String.split| to break the input up to the
-         * error position along newlines and derive the line and column from
-         * there. However IE's |split| implementation is so broken that it was
-         * enough to prevent it.
-         */
-        
-        var line = 1;
-        var column = 1;
-        var seenCR = false;
-        
-        for (var i = 0; i < Math.max(pos, rightmostFailuresPos); i++) {
-          var ch = input.charAt(i);
-          if (ch === "\n") {
-            if (!seenCR) { line++; }
-            column = 1;
-            seenCR = false;
-          } else if (ch === "\r" || ch === "\u2028" || ch === "\u2029") {
-            line++;
-            column = 1;
-            seenCR = true;
-          } else {
-            column++;
-            seenCR = false;
-          }
-        }
-        
-        return { line: line, column: column };
-      }
-      
-      
-        var parser, edges, nodes; 
-      
-        parser = this;
-        delete parser.exports;
-        delete parser.inports;
-        delete parser.outports;
-      
-        edges = parser.edges = [];
-      
-        nodes = {};
-      
-        parser.addNode = function (nodeName, comp) {
-          if (!nodes[nodeName]) {
-            nodes[nodeName] = {}
-          }
-          if (!!comp.comp) {
-            nodes[nodeName].component = comp.comp;
-          }
-          if (!!comp.meta) {
-            var metadata = {};
-            for (var i = 0; i < comp.meta.length; i++) {
-              var item = comp.meta[i].split('=');
-              if (item.length === 1) {
-                item = ['routes', item[0]];
-              }
-              metadata[item[0]] = item[1];
-            }
-            nodes[nodeName].metadata=metadata;
-          }
-         
-        }
-      
-        parser.getResult = function () {
-          return {processes:nodes, connections:parser.processEdges(), exports:parser.exports, inports: parser.inports, outports: parser.outports};
-        }  
-      
-        var flatten = function (array, isShallow) {
-          var index = -1,
-            length = array ? array.length : 0,
-            result = [];
-      
-          while (++index < length) {
-            var value = array[index];
-      
-            if (value instanceof Array) {
-              Array.prototype.push.apply(result, isShallow ? value : flatten(value));
-            }
-            else {
-              result.push(value);
-            }
-          }
-          return result;
-        }
-        
-        parser.registerExports = function (priv, pub) {
-          if (!parser.exports) {
-            parser.exports = [];
-          }
-          parser.exports.push({private:priv.toLowerCase(), public:pub.toLowerCase()})
-        }
-        parser.registerInports = function (node, port, pub) {
-          if (!parser.inports) {
-            parser.inports = {};
-          }
-          parser.inports[pub.toLowerCase()] = {process:node, port:port.toLowerCase()}
-        }
-        parser.registerOutports = function (node, port, pub) {
-          if (!parser.outports) {
-            parser.outports = {};
-          }
-          parser.outports[pub.toLowerCase()] = {process:node, port:port.toLowerCase()}
-        }
-      
-        parser.registerEdges = function (edges) {
-      
-          edges.forEach(function (o, i) {
-            parser.edges.push(o);
-          });
-        }  
-      
-        parser.processEdges = function () {   
-          var flats, grouped;
-          flats = flatten(parser.edges);
-          grouped = [];
-          var current = {};
-          flats.forEach(function (o, i) {
-            if (i % 2 !== 0) { 
-              var pair = grouped[grouped.length - 1];
-              pair.tgt = o.tgt;
-              return;
-            }
-            grouped.push(o);
-          });
-          return grouped;
-        }
-      
-      
-      var result = parseFunctions[startRule]();
-      
-      /*
-       * The parser is now in one of the following three states:
-       *
-       * 1. The parser successfully parsed the whole input.
-       *
-       *    - |result !== null|
-       *    - |pos === input.length|
-       *    - |rightmostFailuresExpected| may or may not contain something
-       *
-       * 2. The parser successfully parsed only a part of the input.
-       *
-       *    - |result !== null|
-       *    - |pos < input.length|
-       *    - |rightmostFailuresExpected| may or may not contain something
-       *
-       * 3. The parser did not successfully parse any part of the input.
-       *
-       *   - |result === null|
-       *   - |pos === 0|
-       *   - |rightmostFailuresExpected| contains at least one failure
-       *
-       * All code following this comment (including called functions) must
-       * handle these states.
-       */
-      if (result === null || pos !== input.length) {
-        var offset = Math.max(pos, rightmostFailuresPos);
-        var found = offset < input.length ? input.charAt(offset) : null;
-        var errorPosition = computeErrorPosition();
-        
-        throw new this.SyntaxError(
-          cleanupExpected(rightmostFailuresExpected),
-          found,
-          offset,
-          errorPosition.line,
-          errorPosition.column
-        );
-      }
-      
-      return result;
-    },
-    
-    /* Returns the parser source code. */
-    toSource: function() { return this._source; }
-  };
-  
-  /* Thrown when a parser encounters a syntax error. */
-  
-  result.SyntaxError = function(expected, found, offset, line, column) {
-    function buildMessage(expected, found) {
-      var expectedHumanized, foundHumanized;
-      
-      switch (expected.length) {
-        case 0:
-          expectedHumanized = "end of input";
-          break;
-        case 1:
-          expectedHumanized = expected[0];
-          break;
-        default:
-          expectedHumanized = expected.slice(0, expected.length - 1).join(", ")
-            + " or "
-            + expected[expected.length - 1];
-      }
-      
-      foundHumanized = found ? quote(found) : "end of input";
-      
-      return "Expected " + expectedHumanized + " but " + foundHumanized + " found.";
+
+      throw peg$buildException(null, peg$maxFailExpected, peg$maxFailPos);
     }
-    
-    this.name = "SyntaxError";
-    this.expected = expected;
-    this.found = found;
-    this.message = buildMessage(expected, found);
-    this.offset = offset;
-    this.line = line;
-    this.column = column;
+  }
+
+  return {
+    SyntaxError: SyntaxError,
+    parse:       parse
   };
-  
-  result.SyntaxError.prototype = Error.prototype;
-  
-  return result;
 })();
 });
 require.register("noflo-noflo/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.5.10","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"*","noflo/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/LoggingComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
+module.exports = JSON.parse('{"name":"noflo","description":"Flow-Based Programming environment for JavaScript","keywords":["fbp","workflow","flow"],"repo":"noflo/noflo","version":"0.7.4","dependencies":{"bergie/emitter":"*","jashkenas/underscore":"1.8.3","flowbased/fbp":"*"},"remotes":["https://raw.githubusercontent.com"],"development":{},"license":"MIT","main":"src/lib/NoFlo.js","scripts":["src/lib/Graph.js","src/lib/InternalSocket.js","src/lib/IP.js","src/lib/BasePort.js","src/lib/InPort.js","src/lib/OutPort.js","src/lib/Ports.js","src/lib/Port.js","src/lib/ArrayPort.js","src/lib/Component.js","src/lib/AsyncComponent.js","src/lib/ComponentLoader.js","src/lib/NoFlo.js","src/lib/Network.js","src/lib/Platform.js","src/lib/Journal.js","src/lib/Utils.js","src/lib/Helpers.js","src/lib/Streams.js","src/components/Graph.js"],"json":["component.json"],"noflo":{"components":{"Graph":"src/components/Graph.js"}}}');
 });
 require.register("noflo-noflo/src/lib/Graph.js", function(exports, require, module){
 var EventEmitter, Graph, clone, mergeResolveTheirsNaive, platform, resetGraph,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
@@ -3699,8 +3600,8 @@ clone = require('./Utils').clone;
 
 platform = require('./Platform');
 
-Graph = (function(_super) {
-  __extends(Graph, _super);
+Graph = (function(superClass) {
+  extend(Graph, superClass);
 
   Graph.prototype.name = '';
 
@@ -3720,8 +3621,8 @@ Graph = (function(_super) {
 
   Graph.prototype.groups = [];
 
-  function Graph(name) {
-    this.name = name != null ? name : '';
+  function Graph(name1) {
+    this.name = name1 != null ? name1 : '';
     this.properties = {};
     this.nodes = [];
     this.edges = [];
@@ -3796,9 +3697,9 @@ Graph = (function(_super) {
     }
     this.checkTransactionStart();
     exported = {
-      "public": publicPort,
+      "public": publicPort.toLowerCase(),
       process: nodeKey,
-      port: portKey,
+      port: portKey.toLowerCase(),
       metadata: metadata
     };
     this.exports.push(exported);
@@ -3807,12 +3708,12 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.removeExport = function(publicPort) {
-    var exported, found, idx, _i, _len, _ref;
+    var exported, found, i, idx, len, ref;
     publicPort = publicPort.toLowerCase();
     found = null;
-    _ref = this.exports;
-    for (idx = _i = 0, _len = _ref.length; _i < _len; idx = ++_i) {
-      exported = _ref[idx];
+    ref = this.exports;
+    for (idx = i = 0, len = ref.length; i < len; idx = ++i) {
+      exported = ref[idx];
       if (exported["public"] === publicPort) {
         found = exported;
       }
@@ -3830,10 +3731,11 @@ Graph = (function(_super) {
     if (!this.getNode(nodeKey)) {
       return;
     }
+    publicPort = publicPort.toLowerCase();
     this.checkTransactionStart();
     this.inports[publicPort] = {
       process: nodeKey,
-      port: portKey,
+      port: portKey.toLowerCase(),
       metadata: metadata
     };
     this.emit('addInport', publicPort, this.inports[publicPort]);
@@ -3855,6 +3757,8 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.renameInport = function(oldPort, newPort) {
+    oldPort = oldPort.toLowerCase();
+    newPort = newPort.toLowerCase();
     if (!this.inports[oldPort]) {
       return;
     }
@@ -3867,6 +3771,7 @@ Graph = (function(_super) {
 
   Graph.prototype.setInportMetadata = function(publicPort, metadata) {
     var before, item, val;
+    publicPort = publicPort.toLowerCase();
     if (!this.inports[publicPort]) {
       return;
     }
@@ -3891,10 +3796,11 @@ Graph = (function(_super) {
     if (!this.getNode(nodeKey)) {
       return;
     }
+    publicPort = publicPort.toLowerCase();
     this.checkTransactionStart();
     this.outports[publicPort] = {
       process: nodeKey,
-      port: portKey,
+      port: portKey.toLowerCase(),
       metadata: metadata
     };
     this.emit('addOutport', publicPort, this.outports[publicPort]);
@@ -3916,6 +3822,8 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.renameOutport = function(oldPort, newPort) {
+    oldPort = oldPort.toLowerCase();
+    newPort = newPort.toLowerCase();
     if (!this.outports[oldPort]) {
       return;
     }
@@ -3928,6 +3836,7 @@ Graph = (function(_super) {
 
   Graph.prototype.setOutportMetadata = function(publicPort, metadata) {
     var before, item, val;
+    publicPort = publicPort.toLowerCase();
     if (!this.outports[publicPort]) {
       return;
     }
@@ -3962,11 +3871,11 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.renameGroup = function(oldName, newName) {
-    var group, _i, _len, _ref;
+    var group, i, len, ref;
     this.checkTransactionStart();
-    _ref = this.groups;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
+    ref = this.groups;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
       if (!group) {
         continue;
       }
@@ -3980,11 +3889,11 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.removeGroup = function(groupName) {
-    var group, _i, _len, _ref;
+    var group, i, len, ref;
     this.checkTransactionStart();
-    _ref = this.groups;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
+    ref = this.groups;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
       if (!group) {
         continue;
       }
@@ -3999,11 +3908,11 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.setGroupMetadata = function(groupName, metadata) {
-    var before, group, item, val, _i, _len, _ref;
+    var before, group, i, item, len, ref, val;
     this.checkTransactionStart();
-    _ref = this.groups;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
+    ref = this.groups;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
       if (!group) {
         continue;
       }
@@ -4042,75 +3951,75 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.removeNode = function(id) {
-    var edge, exported, group, index, initializer, node, priv, pub, toRemove, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _len5, _len6, _len7, _len8, _m, _n, _o, _p, _q, _ref, _ref1, _ref2, _ref3, _ref4, _ref5;
+    var edge, exported, group, i, index, initializer, j, k, l, len, len1, len2, len3, len4, len5, len6, len7, len8, m, n, node, o, p, priv, pub, q, ref, ref1, ref2, ref3, ref4, ref5, toRemove;
     node = this.getNode(id);
     if (!node) {
       return;
     }
     this.checkTransactionStart();
     toRemove = [];
-    _ref = this.edges;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      edge = _ref[_i];
+    ref = this.edges;
+    for (i = 0, len = ref.length; i < len; i++) {
+      edge = ref[i];
       if ((edge.from.node === node.id) || (edge.to.node === node.id)) {
         toRemove.push(edge);
       }
     }
-    for (_j = 0, _len1 = toRemove.length; _j < _len1; _j++) {
-      edge = toRemove[_j];
+    for (j = 0, len1 = toRemove.length; j < len1; j++) {
+      edge = toRemove[j];
       this.removeEdge(edge.from.node, edge.from.port, edge.to.node, edge.to.port);
     }
     toRemove = [];
-    _ref1 = this.initializers;
-    for (_k = 0, _len2 = _ref1.length; _k < _len2; _k++) {
-      initializer = _ref1[_k];
+    ref1 = this.initializers;
+    for (k = 0, len2 = ref1.length; k < len2; k++) {
+      initializer = ref1[k];
       if (initializer.to.node === node.id) {
         toRemove.push(initializer);
       }
     }
-    for (_l = 0, _len3 = toRemove.length; _l < _len3; _l++) {
-      initializer = toRemove[_l];
+    for (l = 0, len3 = toRemove.length; l < len3; l++) {
+      initializer = toRemove[l];
       this.removeInitial(initializer.to.node, initializer.to.port);
     }
     toRemove = [];
-    _ref2 = this.exports;
-    for (_m = 0, _len4 = _ref2.length; _m < _len4; _m++) {
-      exported = _ref2[_m];
+    ref2 = this.exports;
+    for (m = 0, len4 = ref2.length; m < len4; m++) {
+      exported = ref2[m];
       if (id.toLowerCase() === exported.process) {
         toRemove.push(exported);
       }
     }
-    for (_n = 0, _len5 = toRemove.length; _n < _len5; _n++) {
-      exported = toRemove[_n];
-      this.removeExports(exported["public"]);
+    for (n = 0, len5 = toRemove.length; n < len5; n++) {
+      exported = toRemove[n];
+      this.removeExport(exported["public"]);
     }
     toRemove = [];
-    _ref3 = this.inports;
-    for (pub in _ref3) {
-      priv = _ref3[pub];
+    ref3 = this.inports;
+    for (pub in ref3) {
+      priv = ref3[pub];
       if (priv.process === id) {
         toRemove.push(pub);
       }
     }
-    for (_o = 0, _len6 = toRemove.length; _o < _len6; _o++) {
-      pub = toRemove[_o];
+    for (o = 0, len6 = toRemove.length; o < len6; o++) {
+      pub = toRemove[o];
       this.removeInport(pub);
     }
     toRemove = [];
-    _ref4 = this.outports;
-    for (pub in _ref4) {
-      priv = _ref4[pub];
+    ref4 = this.outports;
+    for (pub in ref4) {
+      priv = ref4[pub];
       if (priv.process === id) {
         toRemove.push(pub);
       }
     }
-    for (_p = 0, _len7 = toRemove.length; _p < _len7; _p++) {
-      pub = toRemove[_p];
+    for (p = 0, len7 = toRemove.length; p < len7; p++) {
+      pub = toRemove[p];
       this.removeOutport(pub);
     }
-    _ref5 = this.groups;
-    for (_q = 0, _len8 = _ref5.length; _q < _len8; _q++) {
-      group = _ref5[_q];
+    ref5 = this.groups;
+    for (q = 0, len8 = ref5.length; q < len8; q++) {
+      group = ref5[q];
       if (!group) {
         continue;
       }
@@ -4129,10 +4038,10 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.getNode = function(id) {
-    var node, _i, _len, _ref;
-    _ref = this.nodes;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      node = _ref[_i];
+    var i, len, node, ref;
+    ref = this.nodes;
+    for (i = 0, len = ref.length; i < len; i++) {
+      node = ref[i];
       if (!node) {
         continue;
       }
@@ -4144,16 +4053,16 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.renameNode = function(oldId, newId) {
-    var edge, exported, group, iip, index, node, priv, pub, _i, _j, _k, _l, _len, _len1, _len2, _len3, _ref, _ref1, _ref2, _ref3, _ref4, _ref5;
+    var edge, exported, group, i, iip, index, j, k, l, len, len1, len2, len3, node, priv, pub, ref, ref1, ref2, ref3, ref4, ref5;
     this.checkTransactionStart();
     node = this.getNode(oldId);
     if (!node) {
       return;
     }
     node.id = newId;
-    _ref = this.edges;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      edge = _ref[_i];
+    ref = this.edges;
+    for (i = 0, len = ref.length; i < len; i++) {
+      edge = ref[i];
       if (!edge) {
         continue;
       }
@@ -4164,9 +4073,9 @@ Graph = (function(_super) {
         edge.to.node = newId;
       }
     }
-    _ref1 = this.initializers;
-    for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-      iip = _ref1[_j];
+    ref1 = this.initializers;
+    for (j = 0, len1 = ref1.length; j < len1; j++) {
+      iip = ref1[j];
       if (!iip) {
         continue;
       }
@@ -4174,30 +4083,30 @@ Graph = (function(_super) {
         iip.to.node = newId;
       }
     }
-    _ref2 = this.inports;
-    for (pub in _ref2) {
-      priv = _ref2[pub];
+    ref2 = this.inports;
+    for (pub in ref2) {
+      priv = ref2[pub];
       if (priv.process === oldId) {
         priv.process = newId;
       }
     }
-    _ref3 = this.outports;
-    for (pub in _ref3) {
-      priv = _ref3[pub];
+    ref3 = this.outports;
+    for (pub in ref3) {
+      priv = ref3[pub];
       if (priv.process === oldId) {
         priv.process = newId;
       }
     }
-    _ref4 = this.exports;
-    for (_k = 0, _len2 = _ref4.length; _k < _len2; _k++) {
-      exported = _ref4[_k];
+    ref4 = this.exports;
+    for (k = 0, len2 = ref4.length; k < len2; k++) {
+      exported = ref4[k];
       if (exported.process === oldId) {
         exported.process = newId;
       }
     }
-    _ref5 = this.groups;
-    for (_l = 0, _len3 = _ref5.length; _l < _len3; _l++) {
-      group = _ref5[_l];
+    ref5 = this.groups;
+    for (l = 0, len3 = ref5.length; l < len3; l++) {
+      group = ref5[l];
       if (!group) {
         continue;
       }
@@ -4235,13 +4144,15 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.addEdge = function(outNode, outPort, inNode, inPort, metadata) {
-    var edge, _i, _len, _ref;
+    var edge, i, len, ref;
     if (metadata == null) {
       metadata = {};
     }
-    _ref = this.edges;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      edge = _ref[_i];
+    outPort = outPort.toLowerCase();
+    inPort = inPort.toLowerCase();
+    ref = this.edges;
+    for (i = 0, len = ref.length; i < len; i++) {
+      edge = ref[i];
       if (edge.from.node === outNode && edge.from.port === outPort && edge.to.node === inNode && edge.to.port === inPort) {
         return;
       }
@@ -4281,6 +4192,8 @@ Graph = (function(_super) {
     if (!this.getNode(inNode)) {
       return;
     }
+    outPort = outPort.toLowerCase();
+    inPort = inPort.toLowerCase();
     if (inIndex === null) {
       inIndex = void 0;
     }
@@ -4311,14 +4224,16 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.removeEdge = function(node, port, node2, port2) {
-    var edge, index, toKeep, toRemove, _i, _j, _k, _len, _len1, _len2, _ref, _ref1;
+    var edge, i, index, j, k, len, len1, len2, ref, ref1, toKeep, toRemove;
     this.checkTransactionStart();
+    port = port.toLowerCase();
+    port2 = port2.toLowerCase();
     toRemove = [];
     toKeep = [];
     if (node2 && port2) {
-      _ref = this.edges;
-      for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
-        edge = _ref[index];
+      ref = this.edges;
+      for (index = i = 0, len = ref.length; i < len; index = ++i) {
+        edge = ref[index];
         if (edge.from.node === node && edge.from.port === port && edge.to.node === node2 && edge.to.port === port2) {
           this.setEdgeMetadata(edge.from.node, edge.from.port, edge.to.node, edge.to.port, {});
           toRemove.push(edge);
@@ -4327,9 +4242,9 @@ Graph = (function(_super) {
         }
       }
     } else {
-      _ref1 = this.edges;
-      for (index = _j = 0, _len1 = _ref1.length; _j < _len1; index = ++_j) {
-        edge = _ref1[index];
+      ref1 = this.edges;
+      for (index = j = 0, len1 = ref1.length; j < len1; index = ++j) {
+        edge = ref1[index];
         if ((edge.from.node === node && edge.from.port === port) || (edge.to.node === node && edge.to.port === port)) {
           this.setEdgeMetadata(edge.from.node, edge.from.port, edge.to.node, edge.to.port, {});
           toRemove.push(edge);
@@ -4339,18 +4254,20 @@ Graph = (function(_super) {
       }
     }
     this.edges = toKeep;
-    for (_k = 0, _len2 = toRemove.length; _k < _len2; _k++) {
-      edge = toRemove[_k];
+    for (k = 0, len2 = toRemove.length; k < len2; k++) {
+      edge = toRemove[k];
       this.emit('removeEdge', edge);
     }
     return this.checkTransactionEnd();
   };
 
   Graph.prototype.getEdge = function(node, port, node2, port2) {
-    var edge, index, _i, _len, _ref;
-    _ref = this.edges;
-    for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
-      edge = _ref[index];
+    var edge, i, index, len, ref;
+    port = port.toLowerCase();
+    port2 = port2.toLowerCase();
+    ref = this.edges;
+    for (index = i = 0, len = ref.length; i < len; index = ++i) {
+      edge = ref[index];
       if (!edge) {
         continue;
       }
@@ -4391,6 +4308,7 @@ Graph = (function(_super) {
     if (!this.getNode(node)) {
       return;
     }
+    port = port.toLowerCase();
     this.checkTransactionStart();
     initializer = {
       from: {
@@ -4416,6 +4334,7 @@ Graph = (function(_super) {
     if (index === null) {
       index = void 0;
     }
+    port = port.toLowerCase();
     this.checkTransactionStart();
     initializer = {
       from: {
@@ -4453,13 +4372,14 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.removeInitial = function(node, port) {
-    var edge, index, toKeep, toRemove, _i, _j, _len, _len1, _ref;
+    var edge, i, index, j, len, len1, ref, toKeep, toRemove;
+    port = port.toLowerCase();
     this.checkTransactionStart();
     toRemove = [];
     toKeep = [];
-    _ref = this.initializers;
-    for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
-      edge = _ref[index];
+    ref = this.initializers;
+    for (index = i = 0, len = ref.length; i < len; index = ++i) {
+      edge = ref[index];
       if (edge.to.node === node && edge.to.port === port) {
         toRemove.push(edge);
       } else {
@@ -4467,8 +4387,8 @@ Graph = (function(_super) {
       }
     }
     this.initializers = toKeep;
-    for (_j = 0, _len1 = toRemove.length; _j < _len1; _j++) {
-      edge = toRemove[_j];
+    for (j = 0, len1 = toRemove.length; j < len1; j++) {
+      edge = toRemove[j];
       this.emit('removeInitial', edge);
     }
     return this.checkTransactionEnd();
@@ -4484,7 +4404,7 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.toDOT = function() {
-    var cleanID, cleanPort, data, dot, edge, id, initializer, node, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2;
+    var cleanID, cleanPort, data, dot, edge, i, id, initializer, j, k, len, len1, len2, node, ref, ref1, ref2;
     cleanID = function(id) {
       return id.replace(/\s*/g, "");
     };
@@ -4492,14 +4412,14 @@ Graph = (function(_super) {
       return port.replace(/\./g, "");
     };
     dot = "digraph {\n";
-    _ref = this.nodes;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      node = _ref[_i];
+    ref = this.nodes;
+    for (i = 0, len = ref.length; i < len; i++) {
+      node = ref[i];
       dot += "    " + (cleanID(node.id)) + " [label=" + node.id + " shape=box]\n";
     }
-    _ref1 = this.initializers;
-    for (id = _j = 0, _len1 = _ref1.length; _j < _len1; id = ++_j) {
-      initializer = _ref1[id];
+    ref1 = this.initializers;
+    for (id = j = 0, len1 = ref1.length; j < len1; id = ++j) {
+      initializer = ref1[id];
       if (typeof initializer.from.data === 'function') {
         data = 'Function';
       } else {
@@ -4508,9 +4428,9 @@ Graph = (function(_super) {
       dot += "    data" + id + " [label=\"'" + data + "'\" shape=plaintext]\n";
       dot += "    data" + id + " -> " + (cleanID(initializer.to.node)) + "[headlabel=" + (cleanPort(initializer.to.port)) + " labelfontcolor=blue labelfontsize=8.0]\n";
     }
-    _ref2 = this.edges;
-    for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
-      edge = _ref2[_k];
+    ref2 = this.edges;
+    for (k = 0, len2 = ref2.length; k < len2; k++) {
+      edge = ref2[k];
       dot += "    " + (cleanID(edge.from.node)) + " -> " + (cleanID(edge.to.node)) + "[taillabel=" + (cleanPort(edge.from.port)) + " headlabel=" + (cleanPort(edge.to.port)) + " labelfontcolor=blue labelfontsize=8.0]\n";
     }
     dot += "}";
@@ -4518,23 +4438,23 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.toYUML = function() {
-    var edge, initializer, yuml, _i, _j, _len, _len1, _ref, _ref1;
+    var edge, i, initializer, j, len, len1, ref, ref1, yuml;
     yuml = [];
-    _ref = this.initializers;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      initializer = _ref[_i];
+    ref = this.initializers;
+    for (i = 0, len = ref.length; i < len; i++) {
+      initializer = ref[i];
       yuml.push("(start)[" + initializer.to.port + "]->(" + initializer.to.node + ")");
     }
-    _ref1 = this.edges;
-    for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-      edge = _ref1[_j];
+    ref1 = this.edges;
+    for (j = 0, len1 = ref1.length; j < len1; j++) {
+      edge = ref1[j];
       yuml.push("(" + edge.from.node + ")[" + edge.from.port + "]->(" + edge.to.node + ")");
     }
     return yuml.join(",");
   };
 
   Graph.prototype.toJSON = function() {
-    var connection, edge, exported, group, groupData, initializer, json, node, priv, property, pub, value, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6, _ref7;
+    var connection, edge, exported, group, groupData, i, initializer, j, json, k, l, len, len1, len2, len3, len4, m, node, priv, property, pub, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, value;
     json = {
       properties: {},
       inports: {},
@@ -4546,32 +4466,32 @@ Graph = (function(_super) {
     if (this.name) {
       json.properties.name = this.name;
     }
-    _ref = this.properties;
-    for (property in _ref) {
-      value = _ref[property];
+    ref = this.properties;
+    for (property in ref) {
+      value = ref[property];
       json.properties[property] = value;
     }
-    _ref1 = this.inports;
-    for (pub in _ref1) {
-      priv = _ref1[pub];
+    ref1 = this.inports;
+    for (pub in ref1) {
+      priv = ref1[pub];
       json.inports[pub] = priv;
     }
-    _ref2 = this.outports;
-    for (pub in _ref2) {
-      priv = _ref2[pub];
+    ref2 = this.outports;
+    for (pub in ref2) {
+      priv = ref2[pub];
       json.outports[pub] = priv;
     }
-    _ref3 = this.exports;
-    for (_i = 0, _len = _ref3.length; _i < _len; _i++) {
-      exported = _ref3[_i];
+    ref3 = this.exports;
+    for (i = 0, len = ref3.length; i < len; i++) {
+      exported = ref3[i];
       if (!json.exports) {
         json.exports = [];
       }
       json.exports.push(exported);
     }
-    _ref4 = this.groups;
-    for (_j = 0, _len1 = _ref4.length; _j < _len1; _j++) {
-      group = _ref4[_j];
+    ref4 = this.groups;
+    for (j = 0, len1 = ref4.length; j < len1; j++) {
+      group = ref4[j];
       groupData = {
         name: group.name,
         nodes: group.nodes
@@ -4581,9 +4501,9 @@ Graph = (function(_super) {
       }
       json.groups.push(groupData);
     }
-    _ref5 = this.nodes;
-    for (_k = 0, _len2 = _ref5.length; _k < _len2; _k++) {
-      node = _ref5[_k];
+    ref5 = this.nodes;
+    for (k = 0, len2 = ref5.length; k < len2; k++) {
+      node = ref5[k];
       json.processes[node.id] = {
         component: node.component
       };
@@ -4591,9 +4511,9 @@ Graph = (function(_super) {
         json.processes[node.id].metadata = node.metadata;
       }
     }
-    _ref6 = this.edges;
-    for (_l = 0, _len3 = _ref6.length; _l < _len3; _l++) {
-      edge = _ref6[_l];
+    ref6 = this.edges;
+    for (l = 0, len3 = ref6.length; l < len3; l++) {
+      edge = ref6[l];
       connection = {
         src: {
           process: edge.from.node,
@@ -4611,9 +4531,9 @@ Graph = (function(_super) {
       }
       json.connections.push(connection);
     }
-    _ref7 = this.initializers;
-    for (_m = 0, _len4 = _ref7.length; _m < _len4; _m++) {
-      initializer = _ref7[_m];
+    ref7 = this.initializers;
+    for (m = 0, len4 = ref7.length; m < len4; m++) {
+      initializer = ref7[m];
       json.connections.push({
         data: initializer.from.data,
         tgt: {
@@ -4626,14 +4546,14 @@ Graph = (function(_super) {
     return json;
   };
 
-  Graph.prototype.save = function(file, success) {
+  Graph.prototype.save = function(file, callback) {
     var json;
     json = JSON.stringify(this.toJSON(), null, 4);
-    return require('fs').writeFile("" + file + ".json", json, "utf-8", function(err, data) {
+    return require('fs').writeFile(file + ".json", json, "utf-8", function(err, data) {
       if (err) {
         throw err;
       }
-      return success(file);
+      return callback(file);
     });
   };
 
@@ -4647,8 +4567,8 @@ exports.createGraph = function(name) {
   return new Graph(name);
 };
 
-exports.loadJSON = function(definition, success, metadata) {
-  var conn, def, exported, graph, group, id, portId, priv, processId, properties, property, pub, split, value, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6;
+exports.loadJSON = function(definition, callback, metadata) {
+  var conn, def, exported, graph, group, i, id, j, k, len, len1, len2, portId, priv, processId, properties, property, pub, ref, ref1, ref2, ref3, ref4, ref5, ref6, split, value;
   if (metadata == null) {
     metadata = {};
   }
@@ -4667,26 +4587,26 @@ exports.loadJSON = function(definition, success, metadata) {
   graph = new Graph(definition.properties.name);
   graph.startTransaction('loadJSON', metadata);
   properties = {};
-  _ref = definition.properties;
-  for (property in _ref) {
-    value = _ref[property];
+  ref = definition.properties;
+  for (property in ref) {
+    value = ref[property];
     if (property === 'name') {
       continue;
     }
     properties[property] = value;
   }
   graph.setProperties(properties);
-  _ref1 = definition.processes;
-  for (id in _ref1) {
-    def = _ref1[id];
+  ref1 = definition.processes;
+  for (id in ref1) {
+    def = ref1[id];
     if (!def.metadata) {
       def.metadata = {};
     }
     graph.addNode(id, def.component, def.metadata);
   }
-  _ref2 = definition.connections;
-  for (_i = 0, _len = _ref2.length; _i < _len; _i++) {
-    conn = _ref2[_i];
+  ref2 = definition.connections;
+  for (i = 0, len = ref2.length; i < len; i++) {
+    conn = ref2[i];
     metadata = conn.metadata ? conn.metadata : {};
     if (conn.data !== void 0) {
       if (typeof conn.tgt.index === 'number') {
@@ -4703,9 +4623,9 @@ exports.loadJSON = function(definition, success, metadata) {
     graph.addEdge(conn.src.process, conn.src.port.toLowerCase(), conn.tgt.process, conn.tgt.port.toLowerCase(), metadata);
   }
   if (definition.exports && definition.exports.length) {
-    _ref3 = definition.exports;
-    for (_j = 0, _len1 = _ref3.length; _j < _len1; _j++) {
-      exported = _ref3[_j];
+    ref3 = definition.exports;
+    for (j = 0, len1 = ref3.length; j < len1; j++) {
+      exported = ref3[j];
       if (exported["private"]) {
         split = exported["private"].split('.');
         if (split.length !== 2) {
@@ -4720,43 +4640,48 @@ exports.loadJSON = function(definition, success, metadata) {
         }
       } else {
         processId = exported.process;
-        portId = exported.port;
+        portId = exported.port.toLowerCase();
       }
       graph.addExport(exported["public"], processId, portId, exported.metadata);
     }
   }
   if (definition.inports) {
-    _ref4 = definition.inports;
-    for (pub in _ref4) {
-      priv = _ref4[pub];
-      graph.addInport(pub, priv.process, priv.port, priv.metadata);
+    ref4 = definition.inports;
+    for (pub in ref4) {
+      priv = ref4[pub];
+      graph.addInport(pub, priv.process, priv.port.toLowerCase(), priv.metadata);
     }
   }
   if (definition.outports) {
-    _ref5 = definition.outports;
-    for (pub in _ref5) {
-      priv = _ref5[pub];
-      graph.addOutport(pub, priv.process, priv.port, priv.metadata);
+    ref5 = definition.outports;
+    for (pub in ref5) {
+      priv = ref5[pub];
+      graph.addOutport(pub, priv.process, priv.port.toLowerCase(), priv.metadata);
     }
   }
   if (definition.groups) {
-    _ref6 = definition.groups;
-    for (_k = 0, _len2 = _ref6.length; _k < _len2; _k++) {
-      group = _ref6[_k];
+    ref6 = definition.groups;
+    for (k = 0, len2 = ref6.length; k < len2; k++) {
+      group = ref6[k];
       graph.addGroup(group.name, group.nodes, group.metadata || {});
     }
   }
   graph.endTransaction('loadJSON');
-  return success(graph);
+  return callback(null, graph);
 };
 
-exports.loadFBP = function(fbpData, success) {
-  var definition;
-  definition = require('fbp').parse(fbpData);
-  return exports.loadJSON(definition, success);
+exports.loadFBP = function(fbpData, callback) {
+  var definition, e;
+  try {
+    definition = require('fbp').parse(fbpData);
+  } catch (_error) {
+    e = _error;
+    return callback(e);
+  }
+  return exports.loadJSON(definition, callback);
 };
 
-exports.loadHTTP = function(url, success) {
+exports.loadHTTP = function(url, callback) {
   var req;
   req = new XMLHttpRequest;
   req.onreadystatechange = function() {
@@ -4764,15 +4689,15 @@ exports.loadHTTP = function(url, success) {
       return;
     }
     if (req.status !== 200) {
-      return success();
+      return callback(new Error("Failed to load " + url + ": HTTP " + req.status));
     }
-    return success(req.responseText);
+    return callback(null, req.responseText);
   };
   req.open('GET', url, true);
   return req.send();
 };
 
-exports.loadFile = function(file, success, metadata) {
+exports.loadFile = function(file, callback, metadata) {
   var definition, e;
   if (metadata == null) {
     metadata = {};
@@ -4782,119 +4707,118 @@ exports.loadFile = function(file, success, metadata) {
       definition = require(file);
     } catch (_error) {
       e = _error;
-      exports.loadHTTP(file, function(data) {
-        if (!data) {
-          throw new Error("Failed to load graph " + file);
-          return;
+      exports.loadHTTP(file, function(err, data) {
+        if (err) {
+          return callback(err);
         }
         if (file.split('.').pop() === 'fbp') {
-          return exports.loadFBP(data, success, metadata);
+          return exports.loadFBP(data, callback, metadata);
         }
         definition = JSON.parse(data);
-        return exports.loadJSON(definition, success, metadata);
+        return exports.loadJSON(definition, callback, metadata);
       });
       return;
     }
-    exports.loadJSON(definition, success, metadata);
+    exports.loadJSON(definition, callback, metadata);
     return;
   }
   return require('fs').readFile(file, "utf-8", function(err, data) {
     if (err) {
-      throw err;
+      return callback(err);
     }
     if (file.split('.').pop() === 'fbp') {
-      return exports.loadFBP(data, success);
+      return exports.loadFBP(data, callback);
     }
     definition = JSON.parse(data);
-    return exports.loadJSON(definition, success);
+    return exports.loadJSON(definition, callback);
   });
 };
 
 resetGraph = function(graph) {
-  var edge, exp, group, iip, node, port, v, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6, _results;
-  _ref = (clone(graph.groups)).reverse();
-  for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-    group = _ref[_i];
+  var edge, exp, group, i, iip, j, k, l, len, len1, len2, len3, len4, m, node, port, ref, ref1, ref2, ref3, ref4, ref5, ref6, results, v;
+  ref = (clone(graph.groups)).reverse();
+  for (i = 0, len = ref.length; i < len; i++) {
+    group = ref[i];
     if (group != null) {
       graph.removeGroup(group.name);
     }
   }
-  _ref1 = clone(graph.outports);
-  for (port in _ref1) {
-    v = _ref1[port];
+  ref1 = clone(graph.outports);
+  for (port in ref1) {
+    v = ref1[port];
     graph.removeOutport(port);
   }
-  _ref2 = clone(graph.inports);
-  for (port in _ref2) {
-    v = _ref2[port];
+  ref2 = clone(graph.inports);
+  for (port in ref2) {
+    v = ref2[port];
     graph.removeInport(port);
   }
-  _ref3 = clone(graph.exports.reverse());
-  for (_j = 0, _len1 = _ref3.length; _j < _len1; _j++) {
-    exp = _ref3[_j];
-    graph.removeExports(exp["public"]);
+  ref3 = clone(graph.exports.reverse());
+  for (j = 0, len1 = ref3.length; j < len1; j++) {
+    exp = ref3[j];
+    graph.removeExport(exp["public"]);
   }
   graph.setProperties({});
-  _ref4 = (clone(graph.initializers)).reverse();
-  for (_k = 0, _len2 = _ref4.length; _k < _len2; _k++) {
-    iip = _ref4[_k];
+  ref4 = (clone(graph.initializers)).reverse();
+  for (k = 0, len2 = ref4.length; k < len2; k++) {
+    iip = ref4[k];
     graph.removeInitial(iip.to.node, iip.to.port);
   }
-  _ref5 = (clone(graph.edges)).reverse();
-  for (_l = 0, _len3 = _ref5.length; _l < _len3; _l++) {
-    edge = _ref5[_l];
+  ref5 = (clone(graph.edges)).reverse();
+  for (l = 0, len3 = ref5.length; l < len3; l++) {
+    edge = ref5[l];
     graph.removeEdge(edge.from.node, edge.from.port, edge.to.node, edge.to.port);
   }
-  _ref6 = (clone(graph.nodes)).reverse();
-  _results = [];
-  for (_m = 0, _len4 = _ref6.length; _m < _len4; _m++) {
-    node = _ref6[_m];
-    _results.push(graph.removeNode(node.id));
+  ref6 = (clone(graph.nodes)).reverse();
+  results = [];
+  for (m = 0, len4 = ref6.length; m < len4; m++) {
+    node = ref6[m];
+    results.push(graph.removeNode(node.id));
   }
-  return _results;
+  return results;
 };
 
 mergeResolveTheirsNaive = function(base, to) {
-  var edge, exp, group, iip, node, priv, pub, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1, _ref2, _ref3, _ref4, _ref5, _ref6, _results;
+  var edge, exp, group, i, iip, j, k, l, len, len1, len2, len3, len4, m, node, priv, pub, ref, ref1, ref2, ref3, ref4, ref5, ref6, results;
   resetGraph(base);
-  _ref = to.nodes;
-  for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-    node = _ref[_i];
+  ref = to.nodes;
+  for (i = 0, len = ref.length; i < len; i++) {
+    node = ref[i];
     base.addNode(node.id, node.component, node.metadata);
   }
-  _ref1 = to.edges;
-  for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-    edge = _ref1[_j];
+  ref1 = to.edges;
+  for (j = 0, len1 = ref1.length; j < len1; j++) {
+    edge = ref1[j];
     base.addEdge(edge.from.node, edge.from.port, edge.to.node, edge.to.port, edge.metadata);
   }
-  _ref2 = to.initializers;
-  for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
-    iip = _ref2[_k];
+  ref2 = to.initializers;
+  for (k = 0, len2 = ref2.length; k < len2; k++) {
+    iip = ref2[k];
     base.addInitial(iip.from.data, iip.to.node, iip.to.port, iip.metadata);
   }
-  _ref3 = to.exports;
-  for (_l = 0, _len3 = _ref3.length; _l < _len3; _l++) {
-    exp = _ref3[_l];
+  ref3 = to.exports;
+  for (l = 0, len3 = ref3.length; l < len3; l++) {
+    exp = ref3[l];
     base.addExport(exp["public"], exp.node, exp.port, exp.metadata);
   }
   base.setProperties(to.properties);
-  _ref4 = to.inports;
-  for (pub in _ref4) {
-    priv = _ref4[pub];
+  ref4 = to.inports;
+  for (pub in ref4) {
+    priv = ref4[pub];
     base.addInport(pub, priv.process, priv.port, priv.metadata);
   }
-  _ref5 = to.outports;
-  for (pub in _ref5) {
-    priv = _ref5[pub];
+  ref5 = to.outports;
+  for (pub in ref5) {
+    priv = ref5[pub];
     base.addOutport(pub, priv.process, priv.port, priv.metadata);
   }
-  _ref6 = to.groups;
-  _results = [];
-  for (_m = 0, _len4 = _ref6.length; _m < _len4; _m++) {
-    group = _ref6[_m];
-    _results.push(base.addGroup(group.name, group.nodes, group.metadata));
+  ref6 = to.groups;
+  results = [];
+  for (m = 0, len4 = ref6.length; m < len4; m++) {
+    group = ref6[m];
+    results.push(base.addGroup(group.name, group.nodes, group.metadata));
   }
-  return _results;
+  return results;
 };
 
 exports.equivalent = function(a, b, options) {
@@ -4911,14 +4835,16 @@ exports.mergeResolveTheirs = mergeResolveTheirsNaive;
 
 });
 require.register("noflo-noflo/src/lib/InternalSocket.js", function(exports, require, module){
-var EventEmitter, InternalSocket,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var EventEmitter, IP, InternalSocket,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
-InternalSocket = (function(_super) {
-  __extends(InternalSocket, _super);
+IP = require('./IP');
+
+InternalSocket = (function(superClass) {
+  extend(InternalSocket, superClass);
 
   InternalSocket.prototype.regularEmitEvent = function(event, data) {
     return this.emit(event, data);
@@ -4930,61 +4856,63 @@ InternalSocket = (function(_super) {
       return this.emit(event, data);
     } catch (_error) {
       error = _error;
+      if (this.listeners('error').length === 0) {
+        throw error;
+      }
       return this.emit('error', {
         id: this.to.process.id,
-        error: error
+        error: error,
+        metadata: this.metadata
       });
     }
   };
 
-  function InternalSocket() {
-    this.connected = false;
-    this.groups = [];
+  function InternalSocket(metadata) {
+    this.metadata = metadata != null ? metadata : {};
+    this.brackets = [];
     this.dataDelegate = null;
     this.debug = false;
     this.emitEvent = this.regularEmitEvent;
   }
 
   InternalSocket.prototype.connect = function() {
-    if (this.connected) {
-      return;
-    }
-    this.connected = true;
-    return this.emitEvent('connect', this);
+    return this.handleSocketEvent('connect', null);
   };
 
   InternalSocket.prototype.disconnect = function() {
-    if (!this.connected) {
-      return;
-    }
-    this.connected = false;
-    return this.emitEvent('disconnect', this);
+    return this.handleSocketEvent('disconnect', null);
   };
 
   InternalSocket.prototype.isConnected = function() {
-    return this.connected;
+    return this.brackets.length > 0;
   };
 
   InternalSocket.prototype.send = function(data) {
-    if (!this.connected) {
-      this.connect();
-    }
     if (data === void 0 && typeof this.dataDelegate === 'function') {
       data = this.dataDelegate();
     }
-    return this.emitEvent('data', data);
+    return this.handleSocketEvent('data', data);
+  };
+
+  InternalSocket.prototype.post = function(data) {
+    if (data === void 0 && typeof this.dataDelegate === 'function') {
+      data = this.dataDelegate();
+    }
+    if (data.type === 'data' && this.brackets.length === 0) {
+      this.emitEvent('connect', this);
+    }
+    this.handleSocketEvent('data', data, false);
+    if (data.type === 'data' && this.brackets.length === 0) {
+      return this.emitEvent('disconnect', this);
+    }
   };
 
   InternalSocket.prototype.beginGroup = function(group) {
-    this.groups.push(group);
-    return this.emitEvent('begingroup', group);
+    return this.handleSocketEvent('begingroup', group);
   };
 
   InternalSocket.prototype.endGroup = function() {
-    if (!this.groups.length) {
-      return;
-    }
-    return this.emitEvent('endgroup', this.groups.pop());
+    return this.handleSocketEvent('endgroup');
   };
 
   InternalSocket.prototype.setDataDelegate = function(delegate) {
@@ -5002,21 +4930,102 @@ InternalSocket = (function(_super) {
   InternalSocket.prototype.getId = function() {
     var fromStr, toStr;
     fromStr = function(from) {
-      return "" + from.process.id + "() " + (from.port.toUpperCase());
+      return from.process.id + "() " + (from.port.toUpperCase());
     };
     toStr = function(to) {
-      return "" + (to.port.toUpperCase()) + " " + to.process.id + "()";
+      return (to.port.toUpperCase()) + " " + to.process.id + "()";
     };
     if (!(this.from || this.to)) {
       return "UNDEFINED";
     }
     if (this.from && !this.to) {
-      return "" + (fromStr(this.from)) + " -> ANON";
+      return (fromStr(this.from)) + " -> ANON";
     }
     if (!this.from) {
       return "DATA -> " + (toStr(this.to));
     }
-    return "" + (fromStr(this.from)) + " -> " + (toStr(this.to));
+    return (fromStr(this.from)) + " -> " + (toStr(this.to));
+  };
+
+  InternalSocket.prototype.legacyToIp = function(event, payload) {
+    if (IP.isIP(payload)) {
+      return payload;
+    }
+    switch (event) {
+      case 'connect':
+      case 'begingroup':
+        return new IP('openBracket', payload);
+      case 'disconnect':
+      case 'endgroup':
+        return new IP('closeBracket');
+      default:
+        return new IP('data', payload);
+    }
+  };
+
+  InternalSocket.prototype.ipToLegacy = function(ip) {
+    var legacy;
+    switch (ip.type) {
+      case 'openBracket':
+        if (this.brackets.length === 1) {
+          return legacy = {
+            event: 'connect',
+            payload: this
+          };
+        }
+        return legacy = {
+          event: 'begingroup',
+          payload: ip.data
+        };
+      case 'data':
+        return legacy = {
+          event: 'data',
+          payload: ip.data
+        };
+      case 'closeBracket':
+        if (this.brackets.length === 0) {
+          return legacy = {
+            event: 'disconnect',
+            payload: this
+          };
+        }
+        return legacy = {
+          event: 'endgroup',
+          payload: ip.data
+        };
+    }
+  };
+
+  InternalSocket.prototype.handleSocketEvent = function(event, payload, autoConnect) {
+    var ip, legacyEvent;
+    if (autoConnect == null) {
+      autoConnect = true;
+    }
+    ip = this.legacyToIp(event, payload);
+    if (ip.type === 'data' && this.brackets.length === 0 && autoConnect) {
+      this.handleSocketEvent('connect', null);
+    }
+    if (ip.type === 'openBracket') {
+      if (ip.data === null) {
+        if (this.brackets.length) {
+          return;
+        }
+      } else {
+        if (this.brackets.length === 0 && autoConnect) {
+          this.handleSocketEvent('connect', null);
+        }
+      }
+      this.brackets.push(ip.data);
+    }
+    if (ip.type === 'closeBracket') {
+      if (this.brackets.length === 0) {
+        return;
+      }
+      ip.data = this.brackets.pop();
+    }
+    this.emitEvent('ip', ip);
+    legacyEvent = this.ipToLegacy(ip);
+    return this.emitEvent(legacyEvent.event, legacyEvent.payload);
   };
 
   return InternalSocket;
@@ -5030,17 +5039,84 @@ exports.createSocket = function() {
 };
 
 });
+require.register("noflo-noflo/src/lib/IP.js", function(exports, require, module){
+var IP;
+
+module.exports = IP = (function() {
+  IP.types = ['data', 'openBracket', 'closeBracket'];
+
+  IP.isIP = function(obj) {
+    return obj && typeof obj === 'object' && obj.type && this.types.indexOf(obj.type) > -1;
+  };
+
+  function IP(type, data, options) {
+    var key, val;
+    this.type = type != null ? type : 'data';
+    this.data = data != null ? data : null;
+    if (options == null) {
+      options = {};
+    }
+    this.groups = [];
+    this.scope = null;
+    this.owner = null;
+    this.clonable = false;
+    this.index = null;
+    for (key in options) {
+      val = options[key];
+      this[key] = val;
+    }
+  }
+
+  IP.prototype.clone = function() {
+    var ip, key, val;
+    ip = new IP(this.type);
+    for (key in this) {
+      val = this[key];
+      if (['owner'].indexOf(key) !== -1) {
+        continue;
+      }
+      if (val === null) {
+        continue;
+      }
+      if (typeof val === 'object') {
+        ip[key] = JSON.parse(JSON.stringify(val));
+      } else {
+        ip[key] = val;
+      }
+    }
+    return ip;
+  };
+
+  IP.prototype.move = function(owner) {
+    this.owner = owner;
+  };
+
+  IP.prototype.drop = function() {
+    var key, results, val;
+    results = [];
+    for (key in this) {
+      val = this[key];
+      results.push(delete this[key]);
+    }
+    return results;
+  };
+
+  return IP;
+
+})();
+
+});
 require.register("noflo-noflo/src/lib/BasePort.js", function(exports, require, module){
 var BasePort, EventEmitter, validTypes,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
 validTypes = ['all', 'string', 'number', 'int', 'object', 'array', 'boolean', 'color', 'date', 'bang', 'function', 'buffer'];
 
-BasePort = (function(_super) {
-  __extends(BasePort, _super);
+BasePort = (function(superClass) {
+  extend(BasePort, superClass);
 
   function BasePort(options) {
     this.handleOptions(options);
@@ -5075,7 +5151,7 @@ BasePort = (function(_super) {
     if (!(this.node && this.name)) {
       return 'Port';
     }
-    return "" + this.node + " " + (this.name.toUpperCase());
+    return this.node + " " + (this.name.toUpperCase());
   };
 
   BasePort.prototype.getDataType = function() {
@@ -5156,11 +5232,11 @@ BasePort = (function(_super) {
   };
 
   BasePort.prototype.listAttached = function() {
-    var attached, idx, socket, _i, _len, _ref;
+    var attached, i, idx, len, ref, socket;
     attached = [];
-    _ref = this.sockets;
-    for (idx = _i = 0, _len = _ref.length; _i < _len; idx = ++_i) {
-      socket = _ref[idx];
+    ref = this.sockets;
+    for (idx = i = 0, len = ref.length; i < len; idx = ++i) {
+      socket = ref[idx];
       if (!socket) {
         continue;
       }
@@ -5176,10 +5252,10 @@ BasePort = (function(_super) {
     }
     if (this.isAddressable()) {
       if (socketId === null) {
-        throw new Error("" + (this.getId()) + ": Socket ID required");
+        throw new Error((this.getId()) + ": Socket ID required");
       }
       if (!this.sockets[socketId]) {
-        throw new Error("" + (this.getId()) + ": Socket " + socketId + " not available");
+        throw new Error((this.getId()) + ": Socket " + socketId + " not available");
       }
       return this.sockets[socketId].isConnected();
     }
@@ -5209,14 +5285,16 @@ module.exports = BasePort;
 
 });
 require.register("noflo-noflo/src/lib/InPort.js", function(exports, require, module){
-var BasePort, InPort,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var BasePort, IP, InPort,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 BasePort = require('./BasePort');
 
-InPort = (function(_super) {
-  __extends(InPort, _super);
+IP = require('./IP');
+
+InPort = (function(superClass) {
+  extend(InPort, superClass);
 
   function InPort(options, process) {
     this.process = null;
@@ -5224,8 +5302,17 @@ InPort = (function(_super) {
       process = options;
       options = {};
     }
-    if (options && options.buffered === void 0) {
+    if (options == null) {
+      options = {};
+    }
+    if (options.buffered == null) {
       options.buffered = false;
+    }
+    if (options.control == null) {
+      options.control = false;
+    }
+    if (options.triggering == null) {
+      options.triggering = true;
     }
     if (!process && options && options.process) {
       process = options.process;
@@ -5237,6 +5324,13 @@ InPort = (function(_super) {
       }
       this.process = process;
     }
+    if (options.handle) {
+      if (typeof options.handle !== 'function') {
+        throw new Error('handle must be a function');
+      }
+      this.handle = options.handle;
+      delete options.handle;
+    }
     InPort.__super__.constructor.call(this, options);
     this.prepareBuffer();
   }
@@ -5246,11 +5340,19 @@ InPort = (function(_super) {
       localId = null;
     }
     if (this.hasDefault()) {
-      socket.setDataDelegate((function(_this) {
-        return function() {
-          return _this.options["default"];
-        };
-      })(this));
+      if (this.handle) {
+        socket.setDataDelegate((function(_this) {
+          return function() {
+            return new IP('data', _this.options["default"]);
+          };
+        })(this));
+      } else {
+        socket.setDataDelegate((function(_this) {
+          return function() {
+            return _this.options["default"];
+          };
+        })(this));
+      }
     }
     socket.on('connect', (function(_this) {
       return function() {
@@ -5273,11 +5375,44 @@ InPort = (function(_super) {
         return _this.handleSocketEvent('endgroup', group, localId);
       };
     })(this));
-    return socket.on('disconnect', (function(_this) {
+    socket.on('disconnect', (function(_this) {
       return function() {
         return _this.handleSocketEvent('disconnect', socket, localId);
       };
     })(this));
+    return socket.on('ip', (function(_this) {
+      return function(ip) {
+        return _this.handleIP(ip, localId);
+      };
+    })(this));
+  };
+
+  InPort.prototype.handleIP = function(ip, id) {
+    var buf;
+    if (this.process) {
+      return;
+    }
+    if (this.options.control && ip.type !== 'data') {
+      return;
+    }
+    ip.owner = this.nodeInstance;
+    ip.index = id;
+    if (ip.scope) {
+      if (!(ip.scope in this.scopedBuffer)) {
+        this.scopedBuffer[ip.scope] = [];
+      }
+      buf = this.scopedBuffer[ip.scope];
+    } else {
+      buf = this.buffer;
+    }
+    buf.push(ip);
+    if (this.options.control && buf.length > 1) {
+      buf.shift();
+    }
+    if (this.handle) {
+      this.handle(ip, this.nodeInstance);
+    }
+    return this.emit('ip', ip, id);
   };
 
   InPort.prototype.handleSocketEvent = function(event, payload, id) {
@@ -5318,10 +5453,8 @@ InPort = (function(_super) {
   };
 
   InPort.prototype.prepareBuffer = function() {
-    if (!this.isBuffered()) {
-      return;
-    }
-    return this.buffer = [];
+    this.buffer = [];
+    return this.scopedBuffer = {};
   };
 
   InPort.prototype.validateData = function(data) {
@@ -5329,7 +5462,7 @@ InPort = (function(_super) {
       return;
     }
     if (this.options.values.indexOf(data) === -1) {
-      throw new Error('Invalid data received');
+      throw new Error("Invalid data='" + data + "' received, not in [" + this.options.values + "]");
     }
   };
 
@@ -5351,6 +5484,37 @@ InPort = (function(_super) {
     }).length;
   };
 
+  InPort.prototype.get = function(scope) {
+    var buf;
+    if (scope) {
+      if (!(scope in this.scopedBuffer)) {
+        return void 0;
+      }
+      buf = this.scopedBuffer[scope];
+    } else {
+      buf = this.buffer;
+    }
+    if (this.options.control) {
+      return buf[buf.length - 1];
+    } else {
+      return buf.shift();
+    }
+  };
+
+  InPort.prototype.length = function(scope) {
+    if (scope) {
+      if (!(scope in this.scopedBuffer)) {
+        return 0;
+      }
+      return this.scopedBuffer[scope].length;
+    }
+    return this.buffer.length;
+  };
+
+  InPort.prototype.ready = function(scope) {
+    return this.length(scope) > 0;
+  };
+
   return InPort;
 
 })(BasePort);
@@ -5359,14 +5523,16 @@ module.exports = InPort;
 
 });
 require.register("noflo-noflo/src/lib/OutPort.js", function(exports, require, module){
-var BasePort, OutPort,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var BasePort, IP, OutPort,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 BasePort = require('./BasePort');
 
-OutPort = (function(_super) {
-  __extends(OutPort, _super);
+IP = require('./IP');
+
+OutPort = (function(superClass) {
+  extend(OutPort, superClass);
 
   function OutPort(options) {
     this.cache = {};
@@ -5384,21 +5550,21 @@ OutPort = (function(_super) {
   };
 
   OutPort.prototype.connect = function(socketId) {
-    var socket, sockets, _i, _len, _results;
+    var i, len, results, socket, sockets;
     if (socketId == null) {
       socketId = null;
     }
     sockets = this.getSockets(socketId);
     this.checkRequired(sockets);
-    _results = [];
-    for (_i = 0, _len = sockets.length; _i < _len; _i++) {
-      socket = sockets[_i];
+    results = [];
+    for (i = 0, len = sockets.length; i < len; i++) {
+      socket = sockets[i];
       if (!socket) {
         continue;
       }
-      _results.push(socket.connect());
+      results.push(socket.connect());
     }
-    return _results;
+    return results;
   };
 
   OutPort.prototype.beginGroup = function(group, socketId) {
@@ -5412,13 +5578,7 @@ OutPort = (function(_super) {
       if (!socket) {
         return;
       }
-      if (socket.isConnected()) {
-        return socket.beginGroup(group);
-      }
-      socket.once('connect', function() {
-        return socket.beginGroup(group);
-      });
-      return socket.connect();
+      return socket.beginGroup(group);
     });
   };
 
@@ -5436,62 +5596,121 @@ OutPort = (function(_super) {
       if (!socket) {
         return;
       }
-      if (socket.isConnected()) {
-        return socket.send(data);
-      }
-      socket.once('connect', function() {
-        return socket.send(data);
-      });
-      return socket.connect();
+      return socket.send(data);
     });
   };
 
   OutPort.prototype.endGroup = function(socketId) {
-    var socket, sockets, _i, _len, _results;
+    var i, len, results, socket, sockets;
     if (socketId == null) {
       socketId = null;
     }
     sockets = this.getSockets(socketId);
     this.checkRequired(sockets);
-    _results = [];
-    for (_i = 0, _len = sockets.length; _i < _len; _i++) {
-      socket = sockets[_i];
+    results = [];
+    for (i = 0, len = sockets.length; i < len; i++) {
+      socket = sockets[i];
       if (!socket) {
         continue;
       }
-      _results.push(socket.endGroup());
+      results.push(socket.endGroup());
     }
-    return _results;
+    return results;
   };
 
   OutPort.prototype.disconnect = function(socketId) {
-    var socket, sockets, _i, _len, _results;
+    var i, len, results, socket, sockets;
     if (socketId == null) {
       socketId = null;
     }
     sockets = this.getSockets(socketId);
     this.checkRequired(sockets);
-    _results = [];
-    for (_i = 0, _len = sockets.length; _i < _len; _i++) {
-      socket = sockets[_i];
+    results = [];
+    for (i = 0, len = sockets.length; i < len; i++) {
+      socket = sockets[i];
       if (!socket) {
         continue;
       }
-      _results.push(socket.disconnect());
+      results.push(socket.disconnect());
     }
-    return _results;
+    return results;
+  };
+
+  OutPort.prototype.sendIP = function(type, data, options, socketId) {
+    var i, ip, len, pristine, ref, socket, sockets;
+    if (IP.isIP(type)) {
+      ip = type;
+      socketId = ip.index;
+    } else {
+      ip = new IP(type, data, options);
+    }
+    sockets = this.getSockets(socketId);
+    this.checkRequired(sockets);
+    if (this.isCaching() && data !== ((ref = this.cache[socketId]) != null ? ref.data : void 0)) {
+      this.cache[socketId] = ip;
+    }
+    pristine = true;
+    for (i = 0, len = sockets.length; i < len; i++) {
+      socket = sockets[i];
+      if (!socket) {
+        continue;
+      }
+      if (pristine) {
+        socket.post(ip);
+        pristine = false;
+      } else {
+        socket.post(ip.clonable ? ip.clone() : ip);
+      }
+    }
+    return this;
+  };
+
+  OutPort.prototype.openBracket = function(data, options, socketId) {
+    if (data == null) {
+      data = null;
+    }
+    if (options == null) {
+      options = {};
+    }
+    if (socketId == null) {
+      socketId = null;
+    }
+    return this.sendIP('openBracket', data, options, socketId);
+  };
+
+  OutPort.prototype.data = function(data, options, socketId) {
+    if (options == null) {
+      options = {};
+    }
+    if (socketId == null) {
+      socketId = null;
+    }
+    return this.sendIP('data', data, options, socketId);
+  };
+
+  OutPort.prototype.closeBracket = function(data, options, socketId) {
+    if (data == null) {
+      data = null;
+    }
+    if (options == null) {
+      options = {};
+    }
+    if (socketId == null) {
+      socketId = null;
+    }
+    return this.sendIP('closeBracket', data, options, socketId);
   };
 
   OutPort.prototype.checkRequired = function(sockets) {
     if (sockets.length === 0 && this.isRequired()) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
   };
 
   OutPort.prototype.getSockets = function(socketId) {
     if (this.isAddressable()) {
       if (socketId === null) {
-        throw new Error("" + (this.getId()) + " Socket ID required");
+        throw new Error((this.getId()) + " Socket ID required");
       }
       if (!this.sockets[socketId]) {
         return [];
@@ -5517,8 +5736,8 @@ module.exports = OutPort;
 });
 require.register("noflo-noflo/src/lib/Ports.js", function(exports, require, module){
 var EventEmitter, InPort, InPorts, OutPort, OutPorts, Ports,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
@@ -5526,8 +5745,8 @@ InPort = require('./InPort');
 
 OutPort = require('./OutPort');
 
-Ports = (function(_super) {
-  __extends(Ports, _super);
+Ports = (function(superClass) {
+  extend(Ports, superClass);
 
   Ports.prototype.model = InPort;
 
@@ -5577,8 +5796,8 @@ Ports = (function(_super) {
 
 })(EventEmitter);
 
-exports.InPorts = InPorts = (function(_super) {
-  __extends(InPorts, _super);
+exports.InPorts = InPorts = (function(superClass) {
+  extend(InPorts, superClass);
 
   function InPorts() {
     return InPorts.__super__.constructor.apply(this, arguments);
@@ -5602,8 +5821,8 @@ exports.InPorts = InPorts = (function(_super) {
 
 })(Ports);
 
-exports.OutPorts = OutPorts = (function(_super) {
-  __extends(OutPorts, _super);
+exports.OutPorts = OutPorts = (function(superClass) {
+  extend(OutPorts, superClass);
 
   function OutPorts() {
     return OutPorts.__super__.constructor.apply(this, arguments);
@@ -5653,13 +5872,13 @@ exports.OutPorts = OutPorts = (function(_super) {
 });
 require.register("noflo-noflo/src/lib/Port.js", function(exports, require, module){
 var EventEmitter, Port,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
-Port = (function(_super) {
-  __extends(Port, _super);
+Port = (function(superClass) {
+  extend(Port, superClass);
 
   Port.prototype.description = '';
 
@@ -5683,7 +5902,7 @@ Port = (function(_super) {
     if (!(this.node && this.name)) {
       return 'Port';
     }
-    return "" + this.node + " " + (this.name.toUpperCase());
+    return this.node + " " + (this.name.toUpperCase());
   };
 
   Port.prototype.getDataType = function() {
@@ -5736,22 +5955,22 @@ Port = (function(_super) {
   };
 
   Port.prototype.connect = function() {
-    var socket, _i, _len, _ref, _results;
+    var i, len, ref, results, socket;
     if (this.sockets.length === 0) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
-    _ref = this.sockets;
-    _results = [];
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      socket = _ref[_i];
-      _results.push(socket.connect());
+    ref = this.sockets;
+    results = [];
+    for (i = 0, len = ref.length; i < len; i++) {
+      socket = ref[i];
+      results.push(socket.connect());
     }
-    return _results;
+    return results;
   };
 
   Port.prototype.beginGroup = function(group) {
     if (this.sockets.length === 0) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
     return this.sockets.forEach(function(socket) {
       if (socket.isConnected()) {
@@ -5766,7 +5985,7 @@ Port = (function(_super) {
 
   Port.prototype.send = function(data) {
     if (this.sockets.length === 0) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
     return this.sockets.forEach(function(socket) {
       if (socket.isConnected()) {
@@ -5780,31 +5999,31 @@ Port = (function(_super) {
   };
 
   Port.prototype.endGroup = function() {
-    var socket, _i, _len, _ref, _results;
+    var i, len, ref, results, socket;
     if (this.sockets.length === 0) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
-    _ref = this.sockets;
-    _results = [];
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      socket = _ref[_i];
-      _results.push(socket.endGroup());
+    ref = this.sockets;
+    results = [];
+    for (i = 0, len = ref.length; i < len; i++) {
+      socket = ref[i];
+      results.push(socket.endGroup());
     }
-    return _results;
+    return results;
   };
 
   Port.prototype.disconnect = function() {
-    var socket, _i, _len, _ref, _results;
+    var i, len, ref, results, socket;
     if (this.sockets.length === 0) {
-      throw new Error("" + (this.getId()) + ": No connections available");
+      throw new Error((this.getId()) + ": No connections available");
     }
-    _ref = this.sockets;
-    _results = [];
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      socket = _ref[_i];
-      _results.push(socket.disconnect());
+    ref = this.sockets;
+    results = [];
+    for (i = 0, len = ref.length; i < len; i++) {
+      socket = ref[i];
+      results.push(socket.disconnect());
     }
-    return _results;
+    return results;
   };
 
   Port.prototype.detach = function(socket) {
@@ -5857,11 +6076,11 @@ Port = (function(_super) {
   };
 
   Port.prototype.listAttached = function() {
-    var attached, idx, socket, _i, _len, _ref;
+    var attached, i, idx, len, ref, socket;
     attached = [];
-    _ref = this.sockets;
-    for (idx = _i = 0, _len = _ref.length; _i < _len; idx = ++_i) {
-      socket = _ref[idx];
+    ref = this.sockets;
+    for (idx = i = 0, len = ref.length; i < len; idx = ++i) {
+      socket = ref[idx];
       if (!socket) {
         continue;
       }
@@ -5883,13 +6102,13 @@ exports.Port = Port;
 });
 require.register("noflo-noflo/src/lib/ArrayPort.js", function(exports, require, module){
 var ArrayPort, port,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 port = require("./Port");
 
-ArrayPort = (function(_super) {
-  __extends(ArrayPort, _super);
+ArrayPort = (function(superClass) {
+  extend(ArrayPort, superClass);
 
   function ArrayPort(type) {
     this.type = type;
@@ -5913,7 +6132,7 @@ ArrayPort = (function(_super) {
     }
     if (socketId === null) {
       if (!this.sockets.length) {
-        throw new Error("" + (this.getId()) + ": No connections available");
+        throw new Error((this.getId()) + ": No connections available");
       }
       this.sockets.forEach(function(socket) {
         if (!socket) {
@@ -5924,7 +6143,7 @@ ArrayPort = (function(_super) {
       return;
     }
     if (!this.sockets[socketId]) {
-      throw new Error("" + (this.getId()) + ": No connection '" + socketId + "' available");
+      throw new Error((this.getId()) + ": No connection '" + socketId + "' available");
     }
     return this.sockets[socketId].connect();
   };
@@ -5935,7 +6154,7 @@ ArrayPort = (function(_super) {
     }
     if (socketId === null) {
       if (!this.sockets.length) {
-        throw new Error("" + (this.getId()) + ": No connections available");
+        throw new Error((this.getId()) + ": No connections available");
       }
       this.sockets.forEach((function(_this) {
         return function(socket, index) {
@@ -5948,7 +6167,7 @@ ArrayPort = (function(_super) {
       return;
     }
     if (!this.sockets[socketId]) {
-      throw new Error("" + (this.getId()) + ": No connection '" + socketId + "' available");
+      throw new Error((this.getId()) + ": No connection '" + socketId + "' available");
     }
     if (this.isConnected(socketId)) {
       return this.sockets[socketId].beginGroup(group);
@@ -5967,7 +6186,7 @@ ArrayPort = (function(_super) {
     }
     if (socketId === null) {
       if (!this.sockets.length) {
-        throw new Error("" + (this.getId()) + ": No connections available");
+        throw new Error((this.getId()) + ": No connections available");
       }
       this.sockets.forEach((function(_this) {
         return function(socket, index) {
@@ -5980,7 +6199,7 @@ ArrayPort = (function(_super) {
       return;
     }
     if (!this.sockets[socketId]) {
-      throw new Error("" + (this.getId()) + ": No connection '" + socketId + "' available");
+      throw new Error((this.getId()) + ": No connection '" + socketId + "' available");
     }
     if (this.isConnected(socketId)) {
       return this.sockets[socketId].send(data);
@@ -5999,7 +6218,7 @@ ArrayPort = (function(_super) {
     }
     if (socketId === null) {
       if (!this.sockets.length) {
-        throw new Error("" + (this.getId()) + ": No connections available");
+        throw new Error((this.getId()) + ": No connections available");
       }
       this.sockets.forEach((function(_this) {
         return function(socket, index) {
@@ -6012,23 +6231,23 @@ ArrayPort = (function(_super) {
       return;
     }
     if (!this.sockets[socketId]) {
-      throw new Error("" + (this.getId()) + ": No connection '" + socketId + "' available");
+      throw new Error((this.getId()) + ": No connection '" + socketId + "' available");
     }
     return this.sockets[socketId].endGroup();
   };
 
   ArrayPort.prototype.disconnect = function(socketId) {
-    var socket, _i, _len, _ref;
+    var i, len, ref, socket;
     if (socketId == null) {
       socketId = null;
     }
     if (socketId === null) {
       if (!this.sockets.length) {
-        throw new Error("" + (this.getId()) + ": No connections available");
+        throw new Error((this.getId()) + ": No connections available");
       }
-      _ref = this.sockets;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        socket = _ref[_i];
+      ref = this.sockets;
+      for (i = 0, len = ref.length; i < len; i++) {
+        socket = ref[i];
         if (!socket) {
           return;
         }
@@ -6072,11 +6291,11 @@ ArrayPort = (function(_super) {
   };
 
   ArrayPort.prototype.isAttached = function(socketId) {
-    var socket, _i, _len, _ref;
+    var i, len, ref, socket;
     if (socketId === void 0) {
-      _ref = this.sockets;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        socket = _ref[_i];
+      ref = this.sockets;
+      for (i = 0, len = ref.length; i < len; i++) {
+        socket = ref[i];
         if (socket) {
           return true;
         }
@@ -6097,17 +6316,19 @@ exports.ArrayPort = ArrayPort;
 
 });
 require.register("noflo-noflo/src/lib/Component.js", function(exports, require, module){
-var Component, EventEmitter, ports,
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Component, EventEmitter, IP, ProcessInput, ProcessOutput, ports,
+  bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 EventEmitter = require('events').EventEmitter;
 
 ports = require('./Ports');
 
-Component = (function(_super) {
-  __extends(Component, _super);
+IP = require('./IP');
+
+Component = (function(superClass) {
+  extend(Component, superClass);
 
   Component.prototype.description = '';
 
@@ -6115,8 +6336,16 @@ Component = (function(_super) {
 
   Component.prototype.started = false;
 
+  Component.prototype.load = 0;
+
+  Component.prototype.ordered = false;
+
+  Component.prototype.outputQ = [];
+
+  Component.prototype.activateOnInput = true;
+
   function Component(options) {
-    this.error = __bind(this.error, this);
+    this.error = bind(this.error, this);
     if (!options) {
       options = {};
     }
@@ -6135,6 +6364,21 @@ Component = (function(_super) {
       this.outPorts = options.outPorts;
     } else {
       this.outPorts = new ports.OutPorts(options.outPorts);
+    }
+    if (options.icon) {
+      this.icon = options.icon;
+    }
+    if (options.description) {
+      this.description = options.description;
+    }
+    if ('ordered' in options) {
+      this.ordered = options.ordered;
+    }
+    if ('activateOnInput' in options) {
+      this.activateOnInput = options.activateOnInput;
+    }
+    if (typeof options.process === 'function') {
+      this.process(options.process);
     }
   }
 
@@ -6160,7 +6404,7 @@ Component = (function(_super) {
   };
 
   Component.prototype.error = function(e, groups, errorPort) {
-    var group, _i, _j, _len, _len1;
+    var group, i, j, len, len1;
     if (groups == null) {
       groups = [];
     }
@@ -6168,13 +6412,13 @@ Component = (function(_super) {
       errorPort = 'error';
     }
     if (this.outPorts[errorPort] && (this.outPorts[errorPort].isAttached() || !this.outPorts[errorPort].isRequired())) {
-      for (_i = 0, _len = groups.length; _i < _len; _i++) {
-        group = groups[_i];
+      for (i = 0, len = groups.length; i < len; i++) {
+        group = groups[i];
         this.outPorts[errorPort].beginGroup(group);
       }
       this.outPorts[errorPort].send(e);
-      for (_j = 0, _len1 = groups.length; _j < _len1; _j++) {
-        group = groups[_j];
+      for (j = 0, len1 = groups.length; j < len1; j++) {
+        group = groups[j];
         this.outPorts[errorPort].endGroup();
       }
       this.outPorts[errorPort].disconnect();
@@ -6196,24 +6440,251 @@ Component = (function(_super) {
     return this.started;
   };
 
+  Component.prototype.process = function(handle) {
+    var fn, name, port, ref;
+    if (typeof handle !== 'function') {
+      throw new Error("Process handler must be a function");
+    }
+    if (!this.inPorts) {
+      throw new Error("Component ports must be defined before process function");
+    }
+    this.handle = handle;
+    ref = this.inPorts.ports;
+    fn = (function(_this) {
+      return function(name, port) {
+        if (!port.name) {
+          port.name = name;
+        }
+        return port.on('ip', function(ip) {
+          return _this.handleIP(ip, port);
+        });
+      };
+    })(this);
+    for (name in ref) {
+      port = ref[name];
+      fn(name, port);
+    }
+    return this;
+  };
+
+  Component.prototype.handleIP = function(ip, port) {
+    var input, output, result;
+    if (!port.options.triggering) {
+      return;
+    }
+    result = {};
+    input = new ProcessInput(this.inPorts, ip, this, port, result);
+    output = new ProcessOutput(this.outPorts, ip, this, result);
+    this.load++;
+    return this.handle(input, output, function() {
+      return output.done();
+    });
+  };
+
   return Component;
 
 })(EventEmitter);
 
 exports.Component = Component;
 
+ProcessInput = (function() {
+  function ProcessInput(ports1, ip1, nodeInstance, port1, result1) {
+    this.ports = ports1;
+    this.ip = ip1;
+    this.nodeInstance = nodeInstance;
+    this.port = port1;
+    this.result = result1;
+    this.scope = this.ip.scope;
+  }
+
+  ProcessInput.prototype.activate = function() {
+    this.result.__resolved = false;
+    if (this.nodeInstance.ordered) {
+      return this.nodeInstance.outputQ.push(this.result);
+    }
+  };
+
+  ProcessInput.prototype.has = function() {
+    var i, len, port, res;
+    res = true;
+    for (i = 0, len = arguments.length; i < len; i++) {
+      port = arguments[i];
+      res && (res = this.ports[port].ready(this.scope));
+    }
+    return res;
+  };
+
+  ProcessInput.prototype.get = function() {
+    var port, res;
+    if (this.nodeInstance.ordered && this.nodeInstance.activateOnInput && !('__resolved' in this.result)) {
+      this.activate();
+    }
+    res = (function() {
+      var i, len, results;
+      results = [];
+      for (i = 0, len = arguments.length; i < len; i++) {
+        port = arguments[i];
+        results.push(this.ports[port].get(this.scope));
+      }
+      return results;
+    }).apply(this, arguments);
+    if (arguments.length === 1) {
+      return res[0];
+    } else {
+      return res;
+    }
+  };
+
+  ProcessInput.prototype.getData = function() {
+    var i, ip, ips, len, ref, ref1, results;
+    ips = this.get.apply(this, arguments);
+    if (arguments.length === 1) {
+      return (ref = ips != null ? ips.data : void 0) != null ? ref : void 0;
+    }
+    results = [];
+    for (i = 0, len = ips.length; i < len; i++) {
+      ip = ips[i];
+      results.push((ref1 = ip != null ? ip.data : void 0) != null ? ref1 : void 0);
+    }
+    return results;
+  };
+
+  return ProcessInput;
+
+})();
+
+ProcessOutput = (function() {
+  function ProcessOutput(ports1, ip1, nodeInstance, result1) {
+    this.ports = ports1;
+    this.ip = ip1;
+    this.nodeInstance = nodeInstance;
+    this.result = result1;
+    this.scope = this.ip.scope;
+  }
+
+  ProcessOutput.prototype.activate = function() {
+    this.result.__resolved = false;
+    if (this.nodeInstance.ordered) {
+      return this.nodeInstance.outputQ.push(this.result);
+    }
+  };
+
+  ProcessOutput.prototype.isError = function(err) {
+    return err instanceof Error || Array.isArray(err) && err.length > 0 && err[0] instanceof Error;
+  };
+
+  ProcessOutput.prototype.error = function(err) {
+    var e, i, j, len, len1, multiple, results;
+    multiple = Array.isArray(err);
+    if (!multiple) {
+      err = [err];
+    }
+    if ('error' in this.ports && (this.ports.error.isAttached() || !this.ports.error.isRequired())) {
+      if (multiple) {
+        this.sendIP('error', new IP('openBracket'));
+      }
+      for (i = 0, len = err.length; i < len; i++) {
+        e = err[i];
+        this.sendIP('error', e);
+      }
+      if (multiple) {
+        return this.sendIP('error', new IP('closeBracket'));
+      }
+    } else {
+      results = [];
+      for (j = 0, len1 = err.length; j < len1; j++) {
+        e = err[j];
+        throw e;
+      }
+      return results;
+    }
+  };
+
+  ProcessOutput.prototype.sendIP = function(port, packet) {
+    var ip;
+    if (typeof packet !== 'object' || IP.types.indexOf(packet.type) === -1) {
+      ip = new IP('data', packet);
+    } else {
+      ip = packet;
+    }
+    if (this.scope !== null && ip.scope === null) {
+      ip.scope = this.scope;
+    }
+    if (this.nodeInstance.ordered) {
+      if (!(port in this.result)) {
+        this.result[port] = [];
+      }
+      return this.result[port].push(ip);
+    } else {
+      return this.nodeInstance.outPorts[port].sendIP(ip);
+    }
+  };
+
+  ProcessOutput.prototype.send = function(outputMap) {
+    var packet, port, results;
+    if (this.nodeInstance.ordered && !('__resolved' in this.result)) {
+      this.activate();
+    }
+    if (this.isError(outputMap)) {
+      return this.error(outputMap);
+    }
+    results = [];
+    for (port in outputMap) {
+      packet = outputMap[port];
+      results.push(this.sendIP(port, packet));
+    }
+    return results;
+  };
+
+  ProcessOutput.prototype.sendDone = function(outputMap) {
+    this.send(outputMap);
+    return this.done();
+  };
+
+  ProcessOutput.prototype.done = function(error) {
+    var i, ip, ips, len, port, result;
+    if (error) {
+      this.error(error);
+    }
+    if (this.nodeInstance.ordered) {
+      this.result.__resolved = true;
+      while (this.nodeInstance.outputQ.length > 0) {
+        result = this.nodeInstance.outputQ[0];
+        if (!result.__resolved) {
+          break;
+        }
+        for (port in result) {
+          ips = result[port];
+          if (port === '__resolved') {
+            continue;
+          }
+          for (i = 0, len = ips.length; i < len; i++) {
+            ip = ips[i];
+            this.nodeInstance.outPorts[port].sendIP(ip);
+          }
+        }
+        this.nodeInstance.outputQ.shift();
+      }
+    }
+    return this.nodeInstance.load--;
+  };
+
+  return ProcessOutput;
+
+})();
+
 });
 require.register("noflo-noflo/src/lib/AsyncComponent.js", function(exports, require, module){
 var AsyncComponent, component, port,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 port = require("./Port");
 
 component = require("./Component");
 
-AsyncComponent = (function(_super) {
-  __extends(AsyncComponent, _super);
+AsyncComponent = (function(superClass) {
+  extend(AsyncComponent, superClass);
 
   function AsyncComponent(inPortName, outPortName, errPortName) {
     this.inPortName = inPortName != null ? inPortName : "in";
@@ -6387,60 +6858,10 @@ AsyncComponent = (function(_super) {
 exports.AsyncComponent = AsyncComponent;
 
 });
-require.register("noflo-noflo/src/lib/LoggingComponent.js", function(exports, require, module){
-var Component, Port, util,
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
-
-Component = require("./Component").Component;
-
-Port = require("./Port").Port;
-
-if (!require('./Platform').isBrowser()) {
-  util = require("util");
-} else {
-  util = {
-    inspect: function(data) {
-      return data;
-    }
-  };
-}
-
-exports.LoggingComponent = (function(_super) {
-  __extends(LoggingComponent, _super);
-
-  function LoggingComponent() {
-    this.sendLog = __bind(this.sendLog, this);
-    this.outPorts = {
-      log: new Port()
-    };
-  }
-
-  LoggingComponent.prototype.sendLog = function(message) {
-    if (typeof message === "object") {
-      message.when = new Date;
-      message.source = this.constructor.name;
-      if (this.nodeId != null) {
-        message.nodeID = this.nodeId;
-      }
-    }
-    if ((this.outPorts.log != null) && this.outPorts.log.isAttached()) {
-      return this.outPorts.log.send(message);
-    } else {
-      return console.log(util.inspect(message, 4, true, true));
-    }
-  };
-
-  return LoggingComponent;
-
-})(Component);
-
-});
 require.register("noflo-noflo/src/lib/ComponentLoader.js", function(exports, require, module){
 var ComponentLoader, EventEmitter, internalSocket, nofloGraph, utils,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 internalSocket = require('./InternalSocket');
 
@@ -6450,12 +6871,14 @@ utils = require('./Utils');
 
 EventEmitter = require('events').EventEmitter;
 
-ComponentLoader = (function(_super) {
-  __extends(ComponentLoader, _super);
+ComponentLoader = (function(superClass) {
+  extend(ComponentLoader, superClass);
 
-  function ComponentLoader(baseDir) {
+  function ComponentLoader(baseDir, options) {
     this.baseDir = baseDir;
+    this.options = options != null ? options : {};
     this.components = null;
+    this.componentLoaders = [];
     this.checked = [];
     this.revalidate = false;
     this.libraryIcons = {};
@@ -6470,11 +6893,14 @@ ComponentLoader = (function(_super) {
     if (name === 'noflo') {
       return '';
     }
+    if (name[0] === '@') {
+      name = name.replace(/\@[a-z\-]+\//, '');
+    }
     return name.replace('noflo-', '');
   };
 
   ComponentLoader.prototype.getModuleComponents = function(moduleName) {
-    var cPath, definition, dependency, e, loader, name, prefix, _ref, _ref1, _results;
+    var cPath, definition, dependency, e, loader, loaderPath, name, prefix, ref, ref1, results;
     if (this.checked.indexOf(moduleName) !== -1) {
       return;
     }
@@ -6502,13 +6928,15 @@ ComponentLoader = (function(_super) {
       moduleName = moduleName.substr(1);
     }
     if (definition.noflo.loader) {
-      loader = require("/" + moduleName + "/" + definition.noflo.loader);
+      loaderPath = "/" + moduleName + "/" + definition.noflo.loader;
+      this.componentLoaders.push(loaderPath);
+      loader = require(loaderPath);
       this.registerLoader(loader, function() {});
     }
     if (definition.noflo.components) {
-      _ref = definition.noflo.components;
-      for (name in _ref) {
-        cPath = _ref[name];
+      ref = definition.noflo.components;
+      for (name in ref) {
+        cPath = ref[name];
         if (cPath.indexOf('.js') !== -1) {
           cPath = cPath.replace('.js', '.js');
         }
@@ -6519,13 +6947,13 @@ ComponentLoader = (function(_super) {
       }
     }
     if (definition.noflo.graphs) {
-      _ref1 = definition.noflo.graphs;
-      _results = [];
-      for (name in _ref1) {
-        cPath = _ref1[name];
-        _results.push(this.registerGraph(prefix, name, "/" + moduleName + "/" + cPath));
+      ref1 = definition.noflo.graphs;
+      results = [];
+      for (name in ref1) {
+        cPath = ref1[name];
+        results.push(this.registerGraph(prefix, name, "/" + moduleName + "/" + cPath));
       }
-      return _results;
+      return results;
     }
   };
 
@@ -6533,13 +6961,13 @@ ComponentLoader = (function(_super) {
     if (this.processing) {
       this.once('ready', (function(_this) {
         return function() {
-          return callback(_this.components);
+          return callback(null, _this.components);
         };
       })(this));
       return;
     }
     if (this.components) {
-      return callback(this.components);
+      return callback(null, this.components);
     }
     this.ready = false;
     this.processing = true;
@@ -6551,7 +6979,7 @@ ComponentLoader = (function(_super) {
         _this.ready = true;
         _this.emit('ready', true);
         if (callback) {
-          return callback(_this.components);
+          return callback(null, _this.components);
         }
       };
     })(this), 1);
@@ -6561,7 +6989,10 @@ ComponentLoader = (function(_super) {
     var component, componentName;
     if (!this.ready) {
       this.listComponents((function(_this) {
-        return function() {
+        return function(err) {
+          if (err) {
+            return callback(err);
+          }
           return _this.load(name, callback, metadata);
         };
       })(this));
@@ -6633,6 +7064,9 @@ ComponentLoader = (function(_super) {
       callback(new Error("Invalid type " + (typeof implementation) + " for component " + name + "."));
       return;
     }
+    if (typeof name === 'string') {
+      instance.componentName = name;
+    }
     return callback(null, instance);
   };
 
@@ -6654,6 +7088,9 @@ ComponentLoader = (function(_super) {
     graph.loader = this;
     graph.baseDir = this.baseDir;
     graph.inPorts.graph.attach(graphSocket);
+    if (typeof name === 'string') {
+      graph.componentName = name;
+    }
     graphSocket.send(component);
     graphSocket.disconnect();
     graph.inPorts.remove('graph');
@@ -6662,11 +7099,11 @@ ComponentLoader = (function(_super) {
   };
 
   ComponentLoader.prototype.setIcon = function(name, instance) {
-    var componentName, library, _ref;
+    var componentName, library, ref;
     if (!instance.getIcon || instance.getIcon()) {
       return;
     }
-    _ref = name.split('/'), library = _ref[0], componentName = _ref[1];
+    ref = name.split('/'), library = ref[0], componentName = ref[1];
     if (componentName && this.getLibraryIcon(library)) {
       instance.setIcon(this.getLibraryIcon(library));
       return;
@@ -6688,7 +7125,7 @@ ComponentLoader = (function(_super) {
   ComponentLoader.prototype.normalizeName = function(packageId, name) {
     var fullName, prefix;
     prefix = this.getModulePrefix(packageId);
-    fullName = "" + prefix + "/" + name;
+    fullName = prefix + "/" + name;
     if (!packageId) {
       fullName = name;
     }
@@ -6716,7 +7153,10 @@ ComponentLoader = (function(_super) {
     var e, implementation;
     if (!this.ready) {
       this.listComponents((function(_this) {
-        return function() {
+        return function(err) {
+          if (err) {
+            return callback(err);
+          }
           return _this.setSource(packageId, name, source, language, callback);
         };
       })(this));
@@ -6730,6 +7170,16 @@ ComponentLoader = (function(_super) {
         source = CoffeeScript.compile(source, {
           bare: true
         });
+      } catch (_error) {
+        e = _error;
+        return callback(e);
+      }
+    } else if (language === 'es6' || language === 'es2015') {
+      if (!window.babel) {
+        return callback(new Error('Babel compiler not available'));
+      }
+      try {
+        source = babel.transform(source).code;
       } catch (_error) {
         e = _error;
         return callback(e);
@@ -6755,7 +7205,10 @@ ComponentLoader = (function(_super) {
     var component, componentName, nameParts, path;
     if (!this.ready) {
       this.listComponents((function(_this) {
-        return function() {
+        return function(err) {
+          if (err) {
+            return callback(err);
+          }
           return _this.getSource(name, callback);
         };
       })(this));
@@ -6783,7 +7236,10 @@ ComponentLoader = (function(_super) {
       nameParts[0] = '';
     }
     if (this.isGraph(component)) {
-      nofloGraph.loadFile(component, function(graph) {
+      nofloGraph.loadFile(component, function(err, graph) {
+        if (err) {
+          return callback(err);
+        }
         if (!graph) {
           return callback(new Error('Unable to load graph'));
         }
@@ -6848,8 +7304,6 @@ exports.Component = require('./Component').Component;
 
 exports.AsyncComponent = require('./AsyncComponent').AsyncComponent;
 
-exports.LoggingComponent = require('./LoggingComponent').LoggingComponent;
-
 exports.helpers = require('./Helpers');
 
 ports = require('./Ports');
@@ -6868,42 +7322,71 @@ exports.ArrayPort = require('./ArrayPort').ArrayPort;
 
 exports.internalSocket = require('./InternalSocket');
 
-exports.createNetwork = function(graph, callback, delay) {
+exports.IP = require('./IP');
+
+exports.createNetwork = function(graph, callback, options) {
   var network, networkReady;
-  network = new exports.Network(graph);
+  if (typeof options !== 'object') {
+    options = {
+      delay: options
+    };
+  }
+  if (typeof callback !== 'function') {
+    callback = function(err) {
+      if (err) {
+        throw err;
+      }
+    };
+  }
+  network = new exports.Network(graph, options);
   networkReady = function(network) {
-    if (callback != null) {
-      callback(network);
-    }
-    return network.start();
+    return network.start(function(err) {
+      if (err) {
+        return callback(err);
+      }
+      return callback(null, network);
+    });
   };
-  network.loader.listComponents(function() {
+  network.loader.listComponents(function(err) {
+    if (err) {
+      return callback(err);
+    }
     if (graph.nodes.length === 0) {
       return networkReady(network);
     }
-    if (delay) {
-      if (callback != null) {
-        callback(network);
-      }
+    if (options.delay) {
+      callback(null, network);
       return;
     }
-    return network.connect(function() {
+    return network.connect(function(err) {
+      if (err) {
+        return callback(err);
+      }
       return networkReady(network);
     });
   });
   return network;
 };
 
-exports.loadFile = function(file, baseDir, callback) {
+exports.loadFile = function(file, options, callback) {
+  var baseDir;
   if (!callback) {
-    callback = baseDir;
+    callback = options;
     baseDir = null;
   }
-  return exports.graph.loadFile(file, function(net) {
-    if (baseDir) {
-      net.baseDir = baseDir;
+  if (callback && typeof options !== 'object') {
+    options = {
+      baseDir: options
+    };
+  }
+  return exports.graph.loadFile(file, function(err, net) {
+    if (err) {
+      return callback(err);
     }
-    return exports.createNetwork(net, callback);
+    if (options.baseDir) {
+      net.baseDir = options.baseDir;
+    }
+    return exports.createNetwork(net, callback, options);
   });
 };
 
@@ -6915,9 +7398,9 @@ exports.saveFile = function(graph, file, callback) {
 
 });
 require.register("noflo-noflo/src/lib/Network.js", function(exports, require, module){
-var EventEmitter, Network, componentLoader, graph, internalSocket, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var EventEmitter, Network, _, componentLoader, graph, internalSocket, platform,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 _ = require("underscore");
 
@@ -6927,14 +7410,16 @@ graph = require("./Graph");
 
 EventEmitter = require('events').EventEmitter;
 
-if (!require('./Platform').isBrowser()) {
+platform = require('./Platform');
+
+if (!platform.isBrowser()) {
   componentLoader = require("./nodejs/ComponentLoader");
 } else {
   componentLoader = require('./ComponentLoader');
 }
 
-Network = (function(_super) {
-  __extends(Network, _super);
+Network = (function(superClass) {
+  extend(Network, superClass);
 
   Network.prototype.processes = {};
 
@@ -6950,7 +7435,8 @@ Network = (function(_super) {
 
   Network.prototype.portBuffer = {};
 
-  function Network(graph) {
+  function Network(graph, options) {
+    this.options = options != null ? options : {};
     this.processes = {};
     this.connections = [];
     this.initials = [];
@@ -6958,53 +7444,51 @@ Network = (function(_super) {
     this.defaults = [];
     this.graph = graph;
     this.started = false;
-    this.debug = false;
-    if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
+    this.debug = true;
+    this.connectionCount = 0;
+    if (!platform.isBrowser()) {
       this.baseDir = graph.baseDir || process.cwd();
     } else {
       this.baseDir = graph.baseDir || '/';
     }
-    this.startupDate = new Date();
+    this.startupDate = null;
     if (graph.componentLoader) {
       this.loader = graph.componentLoader;
     } else {
-      this.loader = new componentLoader.ComponentLoader(this.baseDir);
+      this.loader = new componentLoader.ComponentLoader(this.baseDir, this.options);
     }
   }
 
   Network.prototype.uptime = function() {
+    if (!this.startupDate) {
+      return 0;
+    }
     return new Date() - this.startupDate;
   };
 
-  Network.prototype.connectionCount = 0;
-
   Network.prototype.increaseConnections = function() {
     if (this.connectionCount === 0) {
-      this.emit('start', {
-        start: this.startupDate
-      });
+      this.setStarted(true);
     }
     return this.connectionCount++;
   };
 
   Network.prototype.decreaseConnections = function() {
-    var ender;
     this.connectionCount--;
-    if (this.connectionCount === 0) {
-      ender = _.debounce((function(_this) {
+    if (this.connectionCount) {
+      return;
+    }
+    if (!this.debouncedEnd) {
+      this.debouncedEnd = _.debounce((function(_this) {
         return function() {
           if (_this.connectionCount) {
             return;
           }
-          return _this.emit('end', {
-            start: _this.startupDate,
-            end: new Date,
-            uptime: _this.uptime()
-          });
+          return _this.setStarted(false);
         };
-      })(this), 10);
-      return ender();
+      })(this), 50);
     }
+    return this.debouncedEnd();
   };
 
   Network.prototype.load = function(component, metadata, callback) {
@@ -7031,15 +7515,15 @@ Network = (function(_super) {
     }
     return this.load(node.component, node.metadata, (function(_this) {
       return function(err, instance) {
-        var name, port, _ref, _ref1;
+        var name, port, ref, ref1;
         if (err) {
           return callback(err);
         }
         instance.nodeId = node.id;
         process.component = instance;
-        _ref = process.component.inPorts;
-        for (name in _ref) {
-          port = _ref[name];
+        ref = process.component.inPorts;
+        for (name in ref) {
+          port = ref[name];
           if (!port || typeof port === 'function' || !port.canAttach) {
             continue;
           }
@@ -7047,9 +7531,9 @@ Network = (function(_super) {
           port.nodeInstance = instance;
           port.name = name;
         }
-        _ref1 = process.component.outPorts;
-        for (name in _ref1) {
-          port = _ref1[name];
+        ref1 = process.component.outPorts;
+        for (name in ref1) {
+          port = ref1[name];
           if (!port || typeof port === 'function' || !port.canAttach) {
             continue;
           }
@@ -7081,20 +7565,20 @@ Network = (function(_super) {
   };
 
   Network.prototype.renameNode = function(oldId, newId, callback) {
-    var name, port, process, _ref, _ref1;
+    var name, port, process, ref, ref1;
     process = this.getNode(oldId);
     if (!process) {
       return callback(new Error("Process " + oldId + " not found"));
     }
     process.id = newId;
-    _ref = process.component.inPorts;
-    for (name in _ref) {
-      port = _ref[name];
+    ref = process.component.inPorts;
+    for (name in ref) {
+      port = ref[name];
       port.node = newId;
     }
-    _ref1 = process.component.outPorts;
-    for (name in _ref1) {
-      port = _ref1[name];
+    ref1 = process.component.outPorts;
+    for (name in ref1) {
+      port = ref1[name];
       port.node = newId;
     }
     this.processes[newId] = process;
@@ -7117,7 +7601,13 @@ Network = (function(_super) {
     serialize = (function(_this) {
       return function(next, add) {
         return function(type) {
-          return _this["add" + type](add, function() {
+          return _this["add" + type](add, function(err) {
+            if (err) {
+              console.log(err);
+            }
+            if (err) {
+              return done(err);
+            }
             callStack++;
             if (callStack % 100 === 0) {
               setTimeout(function() {
@@ -7191,8 +7681,14 @@ Network = (function(_super) {
       });
     };
     processOps = (function(_this) {
-      return function() {
+      return function(err) {
         var cb, op;
+        if (err) {
+          if (_this.listeners('process-error').length === 0) {
+            throw err;
+          }
+          _this.emit('process-error', err);
+        }
         if (!graphOps.length) {
           processing = false;
           return;
@@ -7282,8 +7778,12 @@ Network = (function(_super) {
     if (!node.component.network) {
       return;
     }
+    node.component.network.setDebug(this.debug);
     emitSub = (function(_this) {
       return function(type, data) {
+        if (type === 'process-error' && _this.listeners('process-error').length === 0) {
+          throw data;
+        }
         if (type === 'connect') {
           _this.increaseConnections();
         }
@@ -7330,7 +7830,8 @@ Network = (function(_super) {
         _this.increaseConnections();
         return _this.emit('connect', {
           id: socket.getId(),
-          socket: socket
+          socket: socket,
+          metadata: socket.metadata
         });
       };
     })(this));
@@ -7339,7 +7840,8 @@ Network = (function(_super) {
         return _this.emit('begingroup', {
           id: socket.getId(),
           socket: socket,
-          group: group
+          group: group,
+          metadata: socket.metadata
         });
       };
     })(this));
@@ -7348,7 +7850,8 @@ Network = (function(_super) {
         return _this.emit('data', {
           id: socket.getId(),
           socket: socket,
-          data: data
+          data: data,
+          metadata: socket.metadata
         });
       };
     })(this));
@@ -7357,7 +7860,8 @@ Network = (function(_super) {
         return _this.emit('endgroup', {
           id: socket.getId(),
           socket: socket,
-          group: group
+          group: group,
+          metadata: socket.metadata
         });
       };
     })(this));
@@ -7366,12 +7870,16 @@ Network = (function(_super) {
         _this.decreaseConnections();
         return _this.emit('disconnect', {
           id: socket.getId(),
-          socket: socket
+          socket: socket,
+          metadata: socket.metadata
         });
       };
     })(this));
     return socket.on('error', (function(_this) {
       return function(event) {
+        if (_this.listeners('process-error').length === 0) {
+          throw event;
+        }
         return _this.emit('process-error', event);
       };
     })(this));
@@ -7393,13 +7901,14 @@ Network = (function(_super) {
 
   Network.prototype.addEdge = function(edge, callback) {
     var from, socket, to;
-    socket = internalSocket.createSocket();
+    socket = internalSocket.createSocket(edge.metadata);
+    socket.setDebug(this.debug);
     from = this.getNode(edge.from.node);
     if (!from) {
-      throw new Error("No process defined for outbound node " + edge.from.node);
+      return callback(new Error("No process defined for outbound node " + edge.from.node));
     }
     if (!from.component) {
-      throw new Error("No component defined for outbound node " + edge.from.node);
+      return callback(new Error("No component defined for outbound node " + edge.from.node));
     }
     if (!from.component.isReady()) {
       from.component.once("ready", (function(_this) {
@@ -7411,10 +7920,10 @@ Network = (function(_super) {
     }
     to = this.getNode(edge.to.node);
     if (!to) {
-      throw new Error("No process defined for inbound node " + edge.to.node);
+      return callback(new Error("No process defined for inbound node " + edge.to.node));
     }
     if (!to.component) {
-      throw new Error("No component defined for inbound node " + edge.to.node);
+      return callback(new Error("No component defined for inbound node " + edge.to.node));
     }
     if (!to.component.isReady()) {
       to.component.once("ready", (function(_this) {
@@ -7434,11 +7943,11 @@ Network = (function(_super) {
   };
 
   Network.prototype.removeEdge = function(edge, callback) {
-    var connection, _i, _len, _ref, _results;
-    _ref = this.connections;
-    _results = [];
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      connection = _ref[_i];
+    var connection, i, len, ref, results;
+    ref = this.connections;
+    results = [];
+    for (i = 0, len = ref.length; i < len; i++) {
+      connection = ref[i];
       if (!connection) {
         continue;
       }
@@ -7453,16 +7962,16 @@ Network = (function(_super) {
       }
       this.connections.splice(this.connections.indexOf(connection), 1);
       if (callback) {
-        _results.push(callback());
+        results.push(callback());
       } else {
-        _results.push(void 0);
+        results.push(void 0);
       }
     }
-    return _results;
+    return results;
   };
 
   Network.prototype.addDefaults = function(node, callback) {
-    var key, port, process, socket, _ref;
+    var key, port, process, ref, socket;
     process = this.processes[node.id];
     if (!process.component.isReady()) {
       if (process.component.setMaxListeners) {
@@ -7475,11 +7984,12 @@ Network = (function(_super) {
       })(this));
       return;
     }
-    _ref = process.component.inPorts.ports;
-    for (key in _ref) {
-      port = _ref[key];
+    ref = process.component.inPorts.ports;
+    for (key in ref) {
+      port = ref[key];
       if (typeof port.hasDefault === 'function' && port.hasDefault() && !port.isAttached()) {
         socket = internalSocket.createSocket();
+        socket.setDebug(this.debug);
         this.subscribeSocket(socket);
         this.connectPort(socket, process, key, void 0, true);
         this.connections.push(socket);
@@ -7493,11 +8003,12 @@ Network = (function(_super) {
 
   Network.prototype.addInitial = function(initializer, callback) {
     var init, socket, to;
-    socket = internalSocket.createSocket();
+    socket = internalSocket.createSocket(initializer.metadata);
+    socket.setDebug(this.debug);
     this.subscribeSocket(socket);
     to = this.getNode(initializer.to.node);
     if (!to) {
-      throw new Error("No process defined for inbound node " + initializer.to.node);
+      return callback(new Error("No process defined for inbound node " + initializer.to.node));
     }
     if (!(to.component.isReady() || to.component.inPorts[initializer.to.port])) {
       if (to.component.setMaxListeners) {
@@ -7527,10 +8038,10 @@ Network = (function(_super) {
   };
 
   Network.prototype.removeInitial = function(initializer, callback) {
-    var connection, init, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2;
-    _ref = this.connections;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      connection = _ref[_i];
+    var connection, i, init, j, k, len, len1, len2, ref, ref1, ref2;
+    ref = this.connections;
+    for (i = 0, len = ref.length; i < len; i++) {
+      connection = ref[i];
       if (!connection) {
         continue;
       }
@@ -7539,9 +8050,9 @@ Network = (function(_super) {
       }
       connection.to.process.component.inPorts[connection.to.port].detach(connection);
       this.connections.splice(this.connections.indexOf(connection), 1);
-      _ref1 = this.initials;
-      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-        init = _ref1[_j];
+      ref1 = this.initials;
+      for (j = 0, len1 = ref1.length; j < len1; j++) {
+        init = ref1[j];
         if (!init) {
           continue;
         }
@@ -7550,9 +8061,9 @@ Network = (function(_super) {
         }
         this.initials.splice(this.initials.indexOf(init), 1);
       }
-      _ref2 = this.nextInitials;
-      for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
-        init = _ref2[_k];
+      ref2 = this.nextInitials;
+      for (k = 0, len2 = ref2.length; k < len2; k++) {
+        init = ref2[k];
         if (!init) {
           continue;
         }
@@ -7573,17 +8084,21 @@ Network = (function(_super) {
     return initial.socket.disconnect();
   };
 
-  Network.prototype.sendInitials = function() {
+  Network.prototype.sendInitials = function(callback) {
     var send;
+    if (!callback) {
+      callback = function() {};
+    }
     send = (function(_this) {
       return function() {
-        var initial, _i, _len, _ref;
-        _ref = _this.initials;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          initial = _ref[_i];
+        var i, initial, len, ref;
+        ref = _this.initials;
+        for (i = 0, len = ref.length; i < len; i++) {
+          initial = ref[i];
           _this.sendInitial(initial);
         }
-        return _this.initials = [];
+        _this.initials = [];
+        return callback();
       };
     })(this);
     if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
@@ -7604,60 +8119,107 @@ Network = (function(_super) {
     return this.connectionCount > 0;
   };
 
-  Network.prototype.startComponents = function() {
-    var id, process, _ref, _results;
-    _ref = this.processes;
-    _results = [];
-    for (id in _ref) {
-      process = _ref[id];
-      _results.push(process.component.start());
+  Network.prototype.startComponents = function(callback) {
+    var id, process, ref;
+    if (!callback) {
+      callback = function() {};
     }
-    return _results;
+    ref = this.processes;
+    for (id in ref) {
+      process = ref[id];
+      process.component.start();
+    }
+    return callback();
   };
 
-  Network.prototype.sendDefaults = function() {
-    var socket, _i, _len, _ref, _results;
-    _ref = this.defaults;
-    _results = [];
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      socket = _ref[_i];
+  Network.prototype.sendDefaults = function(callback) {
+    var i, len, ref, socket;
+    if (!callback) {
+      callback = function() {};
+    }
+    if (!this.defaults.length) {
+      return callback();
+    }
+    ref = this.defaults;
+    for (i = 0, len = ref.length; i < len; i++) {
+      socket = ref[i];
       if (socket.to.process.component.inPorts[socket.to.port].sockets.length !== 1) {
         continue;
       }
       socket.connect();
       socket.send();
-      _results.push(socket.disconnect());
+      socket.disconnect();
     }
-    return _results;
+    return callback();
   };
 
-  Network.prototype.start = function() {
+  Network.prototype.start = function(callback) {
+    if (!callback) {
+      callback = function() {};
+    }
     if (this.started) {
       this.stop();
     }
-    this.started = true;
     this.initials = this.nextInitials.slice(0);
-    this.startComponents();
-    this.sendInitials();
-    return this.sendDefaults();
+    return this.startComponents((function(_this) {
+      return function(err) {
+        if (err) {
+          return callback(err);
+        }
+        return _this.sendInitials(function(err) {
+          if (err) {
+            return callback(err);
+          }
+          return _this.sendDefaults(function(err) {
+            if (err) {
+              return callback(err);
+            }
+            _this.setStarted(true);
+            return callback(null);
+          });
+        });
+      };
+    })(this));
   };
 
   Network.prototype.stop = function() {
-    var connection, id, process, _i, _len, _ref, _ref1;
-    _ref = this.connections;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      connection = _ref[_i];
+    var connection, i, id, len, process, ref, ref1;
+    ref = this.connections;
+    for (i = 0, len = ref.length; i < len; i++) {
+      connection = ref[i];
       if (!connection.isConnected()) {
         continue;
       }
       connection.disconnect();
     }
-    _ref1 = this.processes;
-    for (id in _ref1) {
-      process = _ref1[id];
+    ref1 = this.processes;
+    for (id in ref1) {
+      process = ref1[id];
       process.component.shutdown();
     }
-    return this.started = false;
+    return this.setStarted(false);
+  };
+
+  Network.prototype.setStarted = function(started) {
+    if (this.started === started) {
+      return;
+    }
+    if (!started) {
+      this.started = false;
+      this.emit('end', {
+        start: this.startupDate,
+        end: new Date,
+        uptime: this.uptime()
+      });
+      return;
+    }
+    if (!this.startupDate) {
+      this.startupDate = new Date;
+    }
+    this.started = true;
+    return this.emit('start', {
+      start: this.startupDate
+    });
   };
 
   Network.prototype.getDebug = function() {
@@ -7665,28 +8227,28 @@ Network = (function(_super) {
   };
 
   Network.prototype.setDebug = function(active) {
-    var instance, process, processId, socket, _i, _len, _ref, _ref1, _results;
+    var i, instance, len, process, processId, ref, ref1, results, socket;
     if (active === this.debug) {
       return;
     }
     this.debug = active;
-    _ref = this.connections;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      socket = _ref[_i];
+    ref = this.connections;
+    for (i = 0, len = ref.length; i < len; i++) {
+      socket = ref[i];
       socket.setDebug(active);
     }
-    _ref1 = this.processes;
-    _results = [];
-    for (processId in _ref1) {
-      process = _ref1[processId];
+    ref1 = this.processes;
+    results = [];
+    for (processId in ref1) {
+      process = ref1[processId];
       instance = process.component;
       if (instance.isSubgraph()) {
-        _results.push(instance.network.setDebug(active));
+        results.push(instance.network.setDebug(active));
       } else {
-        _results.push(void 0);
+        results.push(void 0);
       }
     }
-    return _results;
+    return results;
   };
 
   return Network;
@@ -7698,7 +8260,7 @@ exports.Network = Network;
 });
 require.register("noflo-noflo/src/lib/Platform.js", function(exports, require, module){
 exports.isBrowser = function() {
-  if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
+  if (typeof process !== 'undefined' && process.execPath && process.execPath.match(/node|iojs/)) {
     return false;
   }
   return true;
@@ -7707,9 +8269,9 @@ exports.isBrowser = function() {
 });
 require.register("noflo-noflo/src/lib/Journal.js", function(exports, require, module){
 var EventEmitter, Journal, JournalStore, MemoryJournalStore, calculateMeta, clone, entryToPrettyString,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty,
+  bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
 
 EventEmitter = require('events').EventEmitter;
 
@@ -7720,7 +8282,7 @@ entryToPrettyString = function(entry) {
   a = entry.args;
   switch (entry.cmd) {
     case 'addNode':
-      return "" + a.id + "(" + a.component + ")";
+      return a.id + "(" + a.component + ")";
     case 'removeNode':
       return "DEL " + a.id + "(" + a.component + ")";
     case 'renameNode':
@@ -7728,9 +8290,9 @@ entryToPrettyString = function(entry) {
     case 'changeNode':
       return "META " + a.id;
     case 'addEdge':
-      return "" + a.from.node + " " + a.from.port + " -> " + a.to.port + " " + a.to.node;
+      return a.from.node + " " + a.from.port + " -> " + a.to.port + " " + a.to.node;
     case 'removeEdge':
-      return "" + a.from.node + " " + a.from.port + " -X> " + a.to.port + " " + a.to.node;
+      return a.from.node + " " + a.from.port + " -X> " + a.to.port + " " + a.to.node;
     case 'changeEdge':
       return "META " + a.from.node + " " + a.from.port + " -> " + a.to.port + " " + a.to.node;
     case 'addInitial':
@@ -7786,13 +8348,13 @@ calculateMeta = function(oldMeta, newMeta) {
   return setMeta;
 };
 
-JournalStore = (function(_super) {
-  __extends(JournalStore, _super);
+JournalStore = (function(superClass) {
+  extend(JournalStore, superClass);
 
   JournalStore.prototype.lastRevision = 0;
 
-  function JournalStore(graph) {
-    this.graph = graph;
+  function JournalStore(graph1) {
+    this.graph = graph1;
     this.lastRevision = 0;
   }
 
@@ -7809,8 +8371,8 @@ JournalStore = (function(_super) {
 
 })(EventEmitter);
 
-MemoryJournalStore = (function(_super) {
-  __extends(MemoryJournalStore, _super);
+MemoryJournalStore = (function(superClass) {
+  extend(MemoryJournalStore, superClass);
 
   function MemoryJournalStore(graph) {
     MemoryJournalStore.__super__.constructor.call(this, graph);
@@ -7830,8 +8392,8 @@ MemoryJournalStore = (function(_super) {
 
 })(JournalStore);
 
-Journal = (function(_super) {
-  __extends(Journal, _super);
+Journal = (function(superClass) {
+  extend(Journal, superClass);
 
   Journal.prototype.graph = null;
 
@@ -7840,9 +8402,9 @@ Journal = (function(_super) {
   Journal.prototype.subscribed = true;
 
   function Journal(graph, metadata, store) {
-    this.endTransaction = __bind(this.endTransaction, this);
-    this.startTransaction = __bind(this.startTransaction, this);
-    var edge, group, iip, k, node, v, _i, _j, _k, _l, _len, _len1, _len2, _len3, _ref, _ref1, _ref2, _ref3, _ref4, _ref5;
+    this.endTransaction = bind(this.endTransaction, this);
+    this.startTransaction = bind(this.startTransaction, this);
+    var edge, group, iip, j, k, l, len, len1, len2, len3, m, n, node, ref, ref1, ref2, ref3, ref4, ref5, v;
     this.graph = graph;
     this.entries = [];
     this.subscribed = true;
@@ -7850,43 +8412,43 @@ Journal = (function(_super) {
     if (this.store.transactions.length === 0) {
       this.currentRevision = -1;
       this.startTransaction('initial', metadata);
-      _ref = this.graph.nodes;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        node = _ref[_i];
+      ref = this.graph.nodes;
+      for (j = 0, len = ref.length; j < len; j++) {
+        node = ref[j];
         this.appendCommand('addNode', node);
       }
-      _ref1 = this.graph.edges;
-      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-        edge = _ref1[_j];
+      ref1 = this.graph.edges;
+      for (l = 0, len1 = ref1.length; l < len1; l++) {
+        edge = ref1[l];
         this.appendCommand('addEdge', edge);
       }
-      _ref2 = this.graph.initializers;
-      for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
-        iip = _ref2[_k];
+      ref2 = this.graph.initializers;
+      for (m = 0, len2 = ref2.length; m < len2; m++) {
+        iip = ref2[m];
         this.appendCommand('addInitial', iip);
       }
       if (Object.keys(this.graph.properties).length > 0) {
         this.appendCommand('changeProperties', this.graph.properties, {});
       }
-      _ref3 = this.graph.inports;
-      for (k in _ref3) {
-        v = _ref3[k];
+      ref3 = this.graph.inports;
+      for (k in ref3) {
+        v = ref3[k];
         this.appendCommand('addInport', {
           name: k,
           port: v
         });
       }
-      _ref4 = this.graph.outports;
-      for (k in _ref4) {
-        v = _ref4[k];
+      ref4 = this.graph.outports;
+      for (k in ref4) {
+        v = ref4[k];
         this.appendCommand('addOutport', {
           name: k,
           port: v
         });
       }
-      _ref5 = this.graph.groups;
-      for (_l = 0, _len3 = _ref5.length; _l < _len3; _l++) {
-        group = _ref5[_l];
+      ref5 = this.graph.groups;
+      for (n = 0, len3 = ref5.length; n < len3; n++) {
+        group = ref5[n];
         this.appendCommand('addGroup', group);
       }
       this.endTransaction('initial', metadata);
@@ -8159,7 +8721,7 @@ Journal = (function(_super) {
       case 'renameInport':
         return this.graph.renameInport(a.oldId, a.newId);
       case 'changeInport':
-        return this.graph.setInportMetadata(a.port, calculateMeta(a.old, a["new"]));
+        return this.graph.setInportMetadata(a.name, calculateMeta(a.old, a["new"]));
       case 'addOutport':
         return this.graph.addOutport(a.name, a.port.process, a.port.port, a.port.metadata(a.name));
       case 'removeOutport':
@@ -8167,7 +8729,7 @@ Journal = (function(_super) {
       case 'renameOutport':
         return this.graph.renameOutport(a.oldId, a.newId);
       case 'changeOutport':
-        return this.graph.setOutportMetadata(a.port, calculateMeta(a.old, a["new"]));
+        return this.graph.setOutportMetadata(a.name, calculateMeta(a.old, a["new"]));
       default:
         throw new Error("Unknown journal entry: " + entry.cmd);
     }
@@ -8216,7 +8778,7 @@ Journal = (function(_super) {
       case 'renameInport':
         return this.graph.renameInport(a.newId, a.oldId);
       case 'changeInport':
-        return this.graph.setInportMetadata(a.port, calculateMeta(a["new"], a.old));
+        return this.graph.setInportMetadata(a.name, calculateMeta(a["new"], a.old));
       case 'addOutport':
         return this.graph.removeOutport(a.name);
       case 'removeOutport':
@@ -8224,30 +8786,30 @@ Journal = (function(_super) {
       case 'renameOutport':
         return this.graph.renameOutport(a.newId, a.oldId);
       case 'changeOutport':
-        return this.graph.setOutportMetadata(a.port, calculateMeta(a["new"], a.old));
+        return this.graph.setOutportMetadata(a.name, calculateMeta(a["new"], a.old));
       default:
         throw new Error("Unknown journal entry: " + entry.cmd);
     }
   };
 
   Journal.prototype.moveToRevision = function(revId) {
-    var entries, entry, i, r, _i, _j, _k, _l, _len, _ref, _ref1, _ref2, _ref3, _ref4;
+    var entries, entry, i, j, l, len, m, n, r, ref, ref1, ref2, ref3, ref4, ref5;
     if (revId === this.currentRevision) {
       return;
     }
     this.subscribed = false;
     if (revId > this.currentRevision) {
-      for (r = _i = _ref = this.currentRevision + 1; _ref <= revId ? _i <= revId : _i >= revId; r = _ref <= revId ? ++_i : --_i) {
-        _ref1 = this.store.fetchTransaction(r);
-        for (_j = 0, _len = _ref1.length; _j < _len; _j++) {
-          entry = _ref1[_j];
+      for (r = j = ref = this.currentRevision + 1, ref1 = revId; ref <= ref1 ? j <= ref1 : j >= ref1; r = ref <= ref1 ? ++j : --j) {
+        ref2 = this.store.fetchTransaction(r);
+        for (l = 0, len = ref2.length; l < len; l++) {
+          entry = ref2[l];
           this.executeEntry(entry);
         }
       }
     } else {
-      for (r = _k = _ref2 = this.currentRevision, _ref3 = revId + 1; _k >= _ref3; r = _k += -1) {
+      for (r = m = ref3 = this.currentRevision, ref4 = revId + 1; m >= ref4; r = m += -1) {
         entries = this.store.fetchTransaction(r);
-        for (i = _l = _ref4 = entries.length - 1; _l >= 0; i = _l += -1) {
+        for (i = n = ref5 = entries.length - 1; n >= 0; i = n += -1) {
           this.executeEntryInversed(entries[i]);
         }
       }
@@ -8279,14 +8841,14 @@ Journal = (function(_super) {
   };
 
   Journal.prototype.toPrettyString = function(startRev, endRev) {
-    var e, entry, lines, r, _i, _j, _len;
+    var e, entry, j, l, len, lines, r, ref, ref1;
     startRev |= 0;
     endRev |= this.store.lastRevision;
     lines = [];
-    for (r = _i = startRev; startRev <= endRev ? _i < endRev : _i > endRev; r = startRev <= endRev ? ++_i : --_i) {
+    for (r = j = ref = startRev, ref1 = endRev; ref <= ref1 ? j < ref1 : j > ref1; r = ref <= ref1 ? ++j : --j) {
       e = this.store.fetchTransaction(r);
-      for (_j = 0, _len = e.length; _j < _len; _j++) {
-        entry = e[_j];
+      for (l = 0, len = e.length; l < len; l++) {
+        entry = e[l];
         lines.push(entryToPrettyString(entry));
       }
     }
@@ -8294,14 +8856,14 @@ Journal = (function(_super) {
   };
 
   Journal.prototype.toJSON = function(startRev, endRev) {
-    var entries, entry, r, _i, _j, _len, _ref;
+    var entries, entry, j, l, len, r, ref, ref1, ref2;
     startRev |= 0;
     endRev |= this.store.lastRevision;
     entries = [];
-    for (r = _i = startRev; _i < endRev; r = _i += 1) {
-      _ref = this.store.fetchTransaction(r);
-      for (_j = 0, _len = _ref.length; _j < _len; _j++) {
-        entry = _ref[_j];
+    for (r = j = ref = startRev, ref1 = endRev; j < ref1; r = j += 1) {
+      ref2 = this.store.fetchTransaction(r);
+      for (l = 0, len = ref2.length; l < len; l++) {
+        entry = ref2[l];
         entries.push(entryToPrettyString(entry));
       }
     }
@@ -8311,7 +8873,7 @@ Journal = (function(_super) {
   Journal.prototype.save = function(file, success) {
     var json;
     json = JSON.stringify(this.toJSON(), null, 4);
-    return require('fs').writeFile("" + file + ".json", json, "utf-8", function(err, data) {
+    return require('fs').writeFile(file + ".json", json, "utf-8", function(err, data) {
       if (err) {
         throw err;
       }
@@ -8377,8 +8939,8 @@ exports.guessLanguageFromFilename = guessLanguageFromFilename;
 
 });
 require.register("noflo-noflo/src/lib/Helpers.js", function(exports, require, module){
-var InternalSocket, StreamReceiver, StreamSender, isArray, _,
-  __hasProp = {}.hasOwnProperty;
+var InternalSocket, StreamReceiver, StreamSender, _, isArray,
+  hasProp = {}.hasOwnProperty;
 
 _ = require('underscore');
 
@@ -8429,7 +8991,7 @@ exports.MapComponent = function(component, func, config) {
 };
 
 exports.WirePattern = function(component, config, proc) {
-  var baseShutdown, closeGroupOnOuts, collectGroups, disconnectOuts, gc, inPorts, name, outPorts, port, processQueue, resumeTaskQ, sendGroupToOuts, _fn, _fn1, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _ref1;
+  var baseShutdown, closeGroupOnOuts, collectGroups, disconnectOuts, fn, fn1, gc, inPorts, j, k, l, len, len1, len2, len3, len4, m, n, name, outPorts, port, processQueue, ref, ref1, resumeTaskQ, sendGroupToOuts;
   inPorts = 'in' in config ? config["in"] : 'in';
   if (!isArray(inPorts)) {
     inPorts = [inPorts];
@@ -8505,14 +9067,14 @@ exports.WirePattern = function(component, config, proc) {
   if (collectGroups !== false && config.group) {
     collectGroups = true;
   }
-  for (_i = 0, _len = inPorts.length; _i < _len; _i++) {
-    name = inPorts[_i];
+  for (j = 0, len = inPorts.length; j < len; j++) {
+    name = inPorts[j];
     if (!component.inPorts[name]) {
       throw new Error("no inPort named '" + name + "'");
     }
   }
-  for (_j = 0, _len1 = outPorts.length; _j < _len1; _j++) {
-    name = outPorts[_j];
+  for (k = 0, len1 = outPorts.length; k < len1; k++) {
+    name = outPorts[k];
     if (!component.outPorts[name]) {
       throw new Error("no outPort named '" + name + "'");
     }
@@ -8521,35 +9083,35 @@ exports.WirePattern = function(component, config, proc) {
   component.groupedGroups = {};
   component.groupedDisconnects = {};
   disconnectOuts = function() {
-    var p, _k, _len2, _results;
-    _results = [];
-    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
-      p = outPorts[_k];
+    var l, len2, p, results;
+    results = [];
+    for (l = 0, len2 = outPorts.length; l < len2; l++) {
+      p = outPorts[l];
       if (component.outPorts[p].isConnected()) {
-        _results.push(component.outPorts[p].disconnect());
+        results.push(component.outPorts[p].disconnect());
       } else {
-        _results.push(void 0);
+        results.push(void 0);
       }
     }
-    return _results;
+    return results;
   };
   sendGroupToOuts = function(grp) {
-    var p, _k, _len2, _results;
-    _results = [];
-    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
-      p = outPorts[_k];
-      _results.push(component.outPorts[p].beginGroup(grp));
+    var l, len2, p, results;
+    results = [];
+    for (l = 0, len2 = outPorts.length; l < len2; l++) {
+      p = outPorts[l];
+      results.push(component.outPorts[p].beginGroup(grp));
     }
-    return _results;
+    return results;
   };
   closeGroupOnOuts = function(grp) {
-    var p, _k, _len2, _results;
-    _results = [];
-    for (_k = 0, _len2 = outPorts.length; _k < _len2; _k++) {
-      p = outPorts[_k];
-      _results.push(component.outPorts[p].endGroup(grp));
+    var l, len2, p, results;
+    results = [];
+    for (l = 0, len2 = outPorts.length; l < len2; l++) {
+      p = outPorts[l];
+      results.push(component.outPorts[p].endGroup(grp));
     }
-    return _results;
+    return results;
   };
   component.outputQ = [];
   processQueue = function() {
@@ -8613,11 +9175,11 @@ exports.WirePattern = function(component, config, proc) {
   component.defaultedParams = [];
   component.defaultsSent = false;
   component.sendDefaults = function() {
-    var param, tempSocket, _k, _len2, _ref;
+    var l, len2, param, ref, tempSocket;
     if (component.defaultedParams.length > 0) {
-      _ref = component.defaultedParams;
-      for (_k = 0, _len2 = _ref.length; _k < _len2; _k++) {
-        param = _ref[_k];
+      ref = component.defaultedParams;
+      for (l = 0, len2 = ref.length; l < len2; l++) {
+        param = ref[l];
         if (component.receivedParams.indexOf(param) === -1) {
           tempSocket = InternalSocket.createSocket();
           component.inPorts[param].attach(tempSocket);
@@ -8630,21 +9192,21 @@ exports.WirePattern = function(component, config, proc) {
     return component.defaultsSent = true;
   };
   resumeTaskQ = function() {
-    var task, temp, _results;
+    var results, task, temp;
     if (component.completeParams.length === component.requiredParams.length && component.taskQ.length > 0) {
       temp = component.taskQ.slice(0);
       component.taskQ = [];
-      _results = [];
+      results = [];
       while (temp.length > 0) {
         task = temp.shift();
-        _results.push(task());
+        results.push(task());
       }
-      return _results;
+      return results;
     }
   };
-  _ref = config.params;
-  for (_k = 0, _len2 = _ref.length; _k < _len2; _k++) {
-    port = _ref[_k];
+  ref = config.params;
+  for (l = 0, len2 = ref.length; l < len2; l++) {
+    port = ref[l];
     if (!component.inPorts[port]) {
       throw new Error("no inPort named '" + port + "'");
     }
@@ -8655,8 +9217,8 @@ exports.WirePattern = function(component, config, proc) {
       component.defaultedParams.push(port);
     }
   }
-  _ref1 = config.params;
-  _fn = function(port) {
+  ref1 = config.params;
+  fn = function(port) {
     var inPort;
     inPort = component.inPorts[port];
     return inPort.process = function(event, payload, index) {
@@ -8681,9 +9243,9 @@ exports.WirePattern = function(component, config, proc) {
       return resumeTaskQ();
     };
   };
-  for (_l = 0, _len3 = _ref1.length; _l < _len3; _l++) {
-    port = _ref1[_l];
-    _fn(port);
+  for (m = 0, len3 = ref1.length; m < len3; m++) {
+    port = ref1[m];
+    fn(port);
   }
   component.disconnectData = {};
   component.disconnectQ = [];
@@ -8703,25 +9265,25 @@ exports.WirePattern = function(component, config, proc) {
   };
   component.gcCounter = 0;
   gc = function() {
-    var current, key, val, _ref2, _results;
+    var current, key, ref2, results, val;
     component.gcCounter++;
     if (component.gcCounter % config.gcFrequency === 0) {
       current = new Date().getTime();
-      _ref2 = component.gcTimestamps;
-      _results = [];
-      for (key in _ref2) {
-        val = _ref2[key];
+      ref2 = component.gcTimestamps;
+      results = [];
+      for (key in ref2) {
+        val = ref2[key];
         if ((current - val) > (config.gcTimeout * 1000)) {
           component.dropRequest(key);
-          _results.push(delete component.gcTimestamps[key]);
+          results.push(delete component.gcTimestamps[key]);
         } else {
-          _results.push(void 0);
+          results.push(void 0);
         }
       }
-      return _results;
+      return results;
     }
   };
-  _fn1 = function(port) {
+  fn1 = function(port) {
     var inPort, needPortGroups;
     component.groupBuffers[port] = [];
     component.keyBuffers[port] = null;
@@ -8732,7 +9294,7 @@ exports.WirePattern = function(component, config, proc) {
     }
     needPortGroups = collectGroups instanceof Array && collectGroups.indexOf(port) !== -1;
     return inPort.process = function(event, payload, index) {
-      var data, foundGroup, g, groupLength, groups, grp, i, key, obj, out, outs, postpone, postponedToQ, reqId, requiredLength, resume, task, tmp, whenDone, whenDoneGroups, _len5, _len6, _len7, _len8, _n, _o, _p, _q, _r, _ref2, _ref3, _ref4, _s;
+      var data, foundGroup, g, groupLength, groups, grp, i, key, len5, len6, len7, len8, o, obj, out, outs, postpone, postponedToQ, q, r, ref2, ref3, ref4, reqId, requiredLength, resume, s, t, task, tmp, u, whenDone, whenDoneGroups;
       if (!component.groupBuffers[port]) {
         component.groupBuffers[port] = [];
       }
@@ -8767,7 +9329,7 @@ exports.WirePattern = function(component, config, proc) {
             if (!(key in component.disconnectData)) {
               component.disconnectData[key] = [];
             }
-            for (i = _n = 0, _ref2 = component.disconnectData[key].length; 0 <= _ref2 ? _n < _ref2 : _n > _ref2; i = 0 <= _ref2 ? ++_n : --_n) {
+            for (i = o = 0, ref2 = component.disconnectData[key].length; 0 <= ref2 ? o < ref2 : o > ref2; i = 0 <= ref2 ? ++o : --o) {
               if (!(port in component.disconnectData[key][i])) {
                 foundGroup = true;
                 component.disconnectData[key][i][port] = true;
@@ -8798,13 +9360,8 @@ exports.WirePattern = function(component, config, proc) {
           }
           break;
         case 'data':
-          if (inPorts.length === 1) {
-            if (inPort.isAddressable()) {
-              data = {};
-              data[index] = payload;
-            } else {
-              data = payload;
-            }
+          if (inPorts.length === 1 && !inPort.isAddressable()) {
+            data = payload;
             groups = component.groupBuffers[port];
           } else {
             key = '';
@@ -8812,9 +9369,9 @@ exports.WirePattern = function(component, config, proc) {
               key = component.groupBuffers[port].toString();
               if (config.group instanceof RegExp) {
                 reqId = null;
-                _ref3 = component.groupBuffers[port];
-                for (_o = 0, _len5 = _ref3.length; _o < _len5; _o++) {
-                  grp = _ref3[_o];
+                ref3 = component.groupBuffers[port];
+                for (q = 0, len5 = ref3.length; q < len5; q++) {
+                  grp = ref3[q];
                   if (config.group.test(grp)) {
                     reqId = grp;
                     break;
@@ -8837,7 +9394,7 @@ exports.WirePattern = function(component, config, proc) {
             if (config.field) {
               ++requiredLength;
             }
-            for (i = _p = 0, _ref4 = component.groupedData[key].length; 0 <= _ref4 ? _p < _ref4 : _p > _ref4; i = 0 <= _ref4 ? ++_p : --_p) {
+            for (i = r = 0, ref4 = component.groupedData[key].length; 0 <= ref4 ? r < ref4 : r > ref4; i = 0 <= ref4 ? ++r : --r) {
               if (!(port in component.groupedData[key][i]) || (component.inPorts[port].isAddressable() && config.arrayPolicy["in"] === 'all' && !(index in component.groupedData[key][i][port]))) {
                 foundGroup = true;
                 if (component.inPorts[port].isAddressable()) {
@@ -8859,6 +9416,9 @@ exports.WirePattern = function(component, config, proc) {
                 groupLength = Object.keys(component.groupedData[key][i]).length;
                 if (groupLength === requiredLength) {
                   data = (component.groupedData[key].splice(i, 1))[0];
+                  if (inPorts.length === 1 && inPort.isAddressable()) {
+                    data = data[port];
+                  }
                   groups = (component.groupedGroups[key].splice(i, 1))[0];
                   if (collectGroups === true) {
                     groups = _.intersection.apply(null, _.values(groups));
@@ -8883,29 +9443,39 @@ exports.WirePattern = function(component, config, proc) {
               if (config.field) {
                 obj[config.field] = key;
               }
-              obj[port] = payload;
-              component.groupedData[key].push(obj);
-              if (needPortGroups) {
-                component.groupedGroups[key].push(component.groupBuffers[port]);
-              } else if (collectGroups === true) {
-                tmp = {};
-                tmp[port] = component.groupBuffers[port];
-                component.groupedGroups[key].push(tmp);
+              if (component.inPorts[port].isAddressable()) {
+                obj[port] = {};
+                obj[port][index] = payload;
               } else {
-                component.groupedGroups[key].push([]);
+                obj[port] = payload;
               }
-              if (config.group && key) {
-                component.gcTimestamps[key] = new Date().getTime();
+              if (inPorts.length === 1 && component.inPorts[port].isAddressable() && (config.arrayPolicy["in"] === 'any' || component.inPorts[port].listAttached().length === 1)) {
+                data = obj[port];
+                groups = component.groupBuffers[port];
+              } else {
+                component.groupedData[key].push(obj);
+                if (needPortGroups) {
+                  component.groupedGroups[key].push(component.groupBuffers[port]);
+                } else if (collectGroups === true) {
+                  tmp = {};
+                  tmp[port] = component.groupBuffers[port];
+                  component.groupedGroups[key].push(tmp);
+                } else {
+                  component.groupedGroups[key].push([]);
+                }
+                if (config.group && key) {
+                  component.gcTimestamps[key] = new Date().getTime();
+                }
+                return;
               }
-              return;
             }
           }
           if (config.dropInput && component.completeParams.length !== component.requiredParams.length) {
             return;
           }
           outs = {};
-          for (_q = 0, _len6 = outPorts.length; _q < _len6; _q++) {
-            name = outPorts[_q];
+          for (s = 0, len6 = outPorts.length; s < len6; s++) {
+            name = outPorts[s];
             if (config.async || config.sendStreams && config.sendStreams.indexOf(name) !== -1) {
               outs[name] = new StreamSender(component.outPorts[name], config.ordered);
             } else {
@@ -8920,7 +9490,7 @@ exports.WirePattern = function(component, config, proc) {
           }
           whenDoneGroups = groups.slice(0);
           whenDone = function(err) {
-            var disconnect, out, outputs, _len7, _r;
+            var disconnect, len7, out, outputs, t;
             if (err) {
               component.error(err, whenDoneGroups);
             }
@@ -8938,8 +9508,8 @@ exports.WirePattern = function(component, config, proc) {
             for (name in outputs) {
               out = outputs[name];
               if (config.forwardGroups && config.async) {
-                for (_r = 0, _len7 = whenDoneGroups.length; _r < _len7; _r++) {
-                  i = whenDoneGroups[_r];
+                for (t = 0, len7 = whenDoneGroups.length; t < len7; t++) {
+                  i = whenDoneGroups[t];
                   out.endGroup();
                 }
               }
@@ -8959,15 +9529,15 @@ exports.WirePattern = function(component, config, proc) {
           }
           if (config.forwardGroups && config.async) {
             if (outPorts.length === 1) {
-              for (_r = 0, _len7 = groups.length; _r < _len7; _r++) {
-                g = groups[_r];
+              for (t = 0, len7 = groups.length; t < len7; t++) {
+                g = groups[t];
                 outs.beginGroup(g);
               }
             } else {
               for (name in outs) {
                 out = outs[name];
-                for (_s = 0, _len8 = groups.length; _s < _len8; _s++) {
-                  g = groups[_s];
+                for (u = 0, len8 = groups.length; u < len8; u++) {
+                  g = groups[u];
                   out.beginGroup(g);
                 }
               }
@@ -9009,9 +9579,9 @@ exports.WirePattern = function(component, config, proc) {
       }
     };
   };
-  for (_m = 0, _len4 = inPorts.length; _m < _len4; _m++) {
-    port = inPorts[_m];
-    _fn1(port);
+  for (n = 0, len4 = inPorts.length; n < len4; n++) {
+    port = inPorts[n];
+    fn1(port);
   }
   baseShutdown = component.shutdown;
   component.shutdown = function() {
@@ -9045,7 +9615,7 @@ exports.CustomError = function(message, options) {
 exports.CustomizeError = function(err, options) {
   var key, val;
   for (key in options) {
-    if (!__hasProp.call(options, key)) continue;
+    if (!hasProp.call(options, key)) continue;
     val = options[key];
     err[key] = val;
   }
@@ -9076,7 +9646,7 @@ exports.MultiError = function(component, group, errorPort, forwardedGroups) {
     return component.hasErrors = true;
   };
   component.fail = function(e, groups) {
-    var error, grp, _i, _j, _k, _len, _len1, _len2, _ref, _ref1, _ref2;
+    var error, grp, j, k, l, len, len1, len2, ref, ref1, ref2;
     if (e == null) {
       e = null;
     }
@@ -9098,18 +9668,18 @@ exports.MultiError = function(component, group, errorPort, forwardedGroups) {
     if (group) {
       component.outPorts[errorPort].beginGroup(group);
     }
-    _ref = component.errors;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      error = _ref[_i];
-      _ref1 = error.groups;
-      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-        grp = _ref1[_j];
+    ref = component.errors;
+    for (j = 0, len = ref.length; j < len; j++) {
+      error = ref[j];
+      ref1 = error.groups;
+      for (k = 0, len1 = ref1.length; k < len1; k++) {
+        grp = ref1[k];
         component.outPorts[errorPort].beginGroup(grp);
       }
       component.outPorts[errorPort].send(error.err);
-      _ref2 = error.groups;
-      for (_k = 0, _len2 = _ref2.length; _k < _len2; _k++) {
-        grp = _ref2[_k];
+      ref2 = error.groups;
+      for (l = 0, len2 = ref2.length; l < len2; l++) {
+        grp = ref2[l];
         component.outPorts[errorPort].endGroup();
       }
     }
@@ -9134,8 +9704,8 @@ require.register("noflo-noflo/src/lib/Streams.js", function(exports, require, mo
 var IP, StreamReceiver, StreamSender, Substream;
 
 IP = (function() {
-  function IP(data) {
-    this.data = data;
+  function IP(data1) {
+    this.data = data1;
   }
 
   IP.prototype.sendTo = function(port) {
@@ -9167,11 +9737,11 @@ Substream = (function() {
   };
 
   Substream.prototype.sendTo = function(port) {
-    var ip, _i, _len, _ref;
+    var i, ip, len, ref;
     port.beginGroup(this.key);
-    _ref = this.value;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      ip = _ref[_i];
+    ref = this.value;
+    for (i = 0, len = ref.length; i < len; i++) {
+      ip = ref[i];
       if (ip instanceof Substream || ip instanceof IP) {
         ip.sendTo(port);
       } else {
@@ -9186,7 +9756,7 @@ Substream = (function() {
   };
 
   Substream.prototype.getValue = function() {
-    var hasKeys, ip, obj, res, val, _i, _len, _ref;
+    var hasKeys, i, ip, len, obj, ref, res, val;
     switch (this.value.length) {
       case 0:
         return null;
@@ -9206,9 +9776,9 @@ Substream = (function() {
       default:
         res = [];
         hasKeys = false;
-        _ref = this.value;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          ip = _ref[_i];
+        ref = this.value;
+        for (i = 0, len = ref.length; i < len; i++) {
+          ip = ref[i];
           val = typeof ip.getValue === 'function' ? ip.getValue() : ip;
           if (ip instanceof Substream) {
             obj = {};
@@ -9236,8 +9806,8 @@ Substream = (function() {
 exports.Substream = Substream;
 
 StreamSender = (function() {
-  function StreamSender(port, ordered) {
-    this.port = port;
+  function StreamSender(port1, ordered) {
+    this.port = port1;
     this.ordered = ordered != null ? ordered : false;
     this.q = [];
     this.resetCurrent();
@@ -9300,12 +9870,12 @@ StreamSender = (function() {
   };
 
   StreamSender.prototype.flush = function() {
-    var ip, res, _i, _len, _ref;
+    var i, ip, len, ref, res;
     res = false;
     if (this.q.length > 0) {
-      _ref = this.q;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        ip = _ref[_i];
+      ref = this.q;
+      for (i = 0, len = ref.length; i < len; i++) {
+        ip = ref[i];
         if (ip === null) {
           if (this.port.isConnected()) {
             this.port.disconnect();
@@ -9331,8 +9901,8 @@ StreamSender = (function() {
 exports.StreamSender = StreamSender;
 
 StreamReceiver = (function() {
-  function StreamReceiver(port, buffered, process) {
-    this.port = port;
+  function StreamReceiver(port1, buffered, process) {
+    this.port = port1;
     this.buffered = buffered != null ? buffered : false;
     this.process = process != null ? process : null;
     this.q = [];
@@ -9414,20 +9984,16 @@ exports.StreamReceiver = StreamReceiver;
 });
 require.register("noflo-noflo/src/components/Graph.js", function(exports, require, module){
 var Graph, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
-if (typeof process !== 'undefined' && process.execPath && process.execPath.indexOf('node') !== -1) {
-  noflo = require("../../lib/NoFlo");
-} else {
-  noflo = require('../lib/NoFlo');
-}
+noflo = require("../lib/NoFlo");
 
-Graph = (function(_super) {
-  __extends(Graph, _super);
+Graph = (function(superClass) {
+  extend(Graph, superClass);
 
-  function Graph(metadata) {
-    this.metadata = metadata;
+  function Graph(metadata1) {
+    this.metadata = metadata1;
     this.network = null;
     this.ready = true;
     this.started = false;
@@ -9456,7 +10022,10 @@ Graph = (function(_super) {
         return this.createNetwork(graph);
       }
       noflo.graph.loadJSON(graph, (function(_this) {
-        return function(instance) {
+        return function(err, instance) {
+          if (err) {
+            return _this.error(err);
+          }
           instance.baseDir = _this.baseDir;
           return _this.createNetwork(instance);
         };
@@ -9464,10 +10033,13 @@ Graph = (function(_super) {
       return;
     }
     if (graph.substr(0, 1) !== "/" && graph.substr(1, 1) !== ":" && process && process.cwd) {
-      graph = "" + (process.cwd()) + "/" + graph;
+      graph = (process.cwd()) + "/" + graph;
     }
     return graph = noflo.graph.loadFile(graph, (function(_this) {
-      return function(instance) {
+      return function(err, instance) {
+        if (err) {
+          return _this.error(err);
+        }
         instance.baseDir = _this.baseDir;
         return _this.createNetwork(instance);
       };
@@ -9479,15 +10051,21 @@ Graph = (function(_super) {
     this.icon = graph.properties.icon || this.icon;
     graph.componentLoader = this.loader;
     return noflo.createNetwork(graph, (function(_this) {
-      return function(network) {
+      return function(err, network) {
         _this.network = network;
+        if (err) {
+          return _this.error(err);
+        }
         _this.emit('network', _this.network);
-        return _this.network.connect(function() {
-          var name, notReady, process, _ref;
+        return _this.network.connect(function(err) {
+          var name, notReady, process, ref;
+          if (err) {
+            return _this.error(err);
+          }
           notReady = false;
-          _ref = _this.network.processes;
-          for (name in _ref) {
-            process = _ref[name];
+          ref = _this.network.processes;
+          for (name in ref) {
+            process = ref[name];
             if (!_this.checkComponent(name, process)) {
               notReady = true;
             }
@@ -9531,18 +10109,18 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.isExportedInport = function(port, nodeName, portName) {
-    var exported, priv, pub, _i, _len, _ref, _ref1;
-    _ref = this.network.graph.inports;
-    for (pub in _ref) {
-      priv = _ref[pub];
+    var exported, i, len, priv, pub, ref, ref1;
+    ref = this.network.graph.inports;
+    for (pub in ref) {
+      priv = ref[pub];
       if (!(priv.process === nodeName && priv.port === portName)) {
         continue;
       }
       return pub;
     }
-    _ref1 = this.network.graph.exports;
-    for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
-      exported = _ref1[_i];
+    ref1 = this.network.graph.exports;
+    for (i = 0, len = ref1.length; i < len; i++) {
+      exported = ref1[i];
       if (!(exported.process === nodeName && exported.port === portName)) {
         continue;
       }
@@ -9556,18 +10134,18 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.isExportedOutport = function(port, nodeName, portName) {
-    var exported, priv, pub, _i, _len, _ref, _ref1;
-    _ref = this.network.graph.outports;
-    for (pub in _ref) {
-      priv = _ref[pub];
+    var exported, i, len, priv, pub, ref, ref1;
+    ref = this.network.graph.outports;
+    for (pub in ref) {
+      priv = ref[pub];
       if (!(priv.process === nodeName && priv.port === portName)) {
         continue;
       }
       return pub;
     }
-    _ref1 = this.network.graph.exports;
-    for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
-      exported = _ref1[_i];
+    ref1 = this.network.graph.exports;
+    for (i = 0, len = ref1.length; i < len; i++) {
+      exported = ref1[i];
       if (!(exported.process === nodeName && exported.port === portName)) {
         continue;
       }
@@ -9599,10 +10177,10 @@ Graph = (function(_super) {
   };
 
   Graph.prototype.findEdgePorts = function(name, process) {
-    var port, portName, targetPortName, _ref, _ref1;
-    _ref = process.component.inPorts;
-    for (portName in _ref) {
-      port = _ref[portName];
+    var port, portName, ref, ref1, targetPortName;
+    ref = process.component.inPorts;
+    for (portName in ref) {
+      port = ref[portName];
       if (!port || typeof port === 'function' || !port.canAttach) {
         continue;
       }
@@ -9620,9 +10198,9 @@ Graph = (function(_super) {
         };
       })(this));
     }
-    _ref1 = process.component.outPorts;
-    for (portName in _ref1) {
-      port = _ref1[portName];
+    ref1 = process.component.outPorts;
+    for (portName in ref1) {
+      port = ref1[portName];
       if (!port || typeof port === 'function' || !port.canAttach) {
         continue;
       }
@@ -9671,13 +10249,13 @@ module.exports = JSON.parse('{"name":"noflo-dom","description":"Document Object 
 });
 require.register("noflo-noflo-dom/components/AddClass.js", function(exports, require, module){
 var AddClass, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-AddClass = (function(_super) {
-  __extends(AddClass, _super);
+AddClass = (function(superClass) {
+  extend(AddClass, superClass);
 
   AddClass.prototype.description = 'Add a class to an element';
 
@@ -9722,13 +10300,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/AppendChild.js", function(exports, require, module){
 var AppendChild, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-AppendChild = (function(_super) {
-  __extends(AppendChild, _super);
+AppendChild = (function(superClass) {
+  extend(AppendChild, superClass);
 
   AppendChild.prototype.description = 'Append elements as children of a parent element';
 
@@ -9760,10 +10338,10 @@ AppendChild = (function(_super) {
   }
 
   AppendChild.prototype.append = function() {
-    var child, _i, _len, _ref;
-    _ref = this.children;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      child = _ref[_i];
+    var child, i, len, ref;
+    ref = this.children;
+    for (i = 0, len = ref.length; i < len; i++) {
+      child = ref[i];
       this.parent.appendChild(child);
     }
     return this.children = [];
@@ -9780,13 +10358,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/CreateElement.js", function(exports, require, module){
 var CreateElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-CreateElement = (function(_super) {
-  __extends(CreateElement, _super);
+CreateElement = (function(superClass) {
+  extend(CreateElement, superClass);
 
   CreateElement.prototype.description = 'Create a new DOM Element';
 
@@ -9854,13 +10432,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/CreateFragment.js", function(exports, require, module){
 var CreateFragment, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-CreateFragment = (function(_super) {
-  __extends(CreateFragment, _super);
+CreateFragment = (function(superClass) {
+  extend(CreateFragment, superClass);
 
   CreateFragment.prototype.description = 'Create a new DOM DocumentFragment';
 
@@ -9932,13 +10510,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/GetElement.js", function(exports, require, module){
 var GetElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-GetElement = (function(_super) {
-  __extends(GetElement, _super);
+GetElement = (function(superClass) {
+  extend(GetElement, superClass);
 
   GetElement.prototype.description = 'Get a DOM element matching a query';
 
@@ -9969,7 +10547,7 @@ GetElement = (function(_super) {
   }
 
   GetElement.prototype.select = function(selector) {
-    var el, element, _i, _len;
+    var el, element, i, len;
     if (this.container) {
       el = this.container.querySelectorAll(selector);
     } else {
@@ -9979,8 +10557,8 @@ GetElement = (function(_super) {
       this.error("No element matching '" + selector + "' found");
       return;
     }
-    for (_i = 0, _len = el.length; _i < _len; _i++) {
-      element = el[_i];
+    for (i = 0, len = el.length; i < len; i++) {
+      element = el[i];
       this.outPorts.element.send(element);
     }
     return this.outPorts.element.disconnect();
@@ -10006,13 +10584,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/HasClass.js", function(exports, require, module){
 var HasClass, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-HasClass = (function(_super) {
-  __extends(HasClass, _super);
+HasClass = (function(superClass) {
+  extend(HasClass, superClass);
 
   HasClass.prototype.description = 'Check if an element has a given class';
 
@@ -10076,26 +10654,28 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/Listen.js", function(exports, require, module){
 var Listen, noflo,
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Listen = (function(_super) {
-  __extends(Listen, _super);
+Listen = (function(superClass) {
+  extend(Listen, superClass);
 
   Listen.prototype.description = 'addEventListener for specified event type';
 
   Listen.prototype.icon = 'stethoscope';
 
   function Listen() {
-    this.change = __bind(this.change, this);
+    this.change = bind(this.change, this);
     this.element = null;
     this.type = null;
+    this.preventDefault = false;
     this.inPorts = {
       element: new noflo.Port('object'),
-      type: new noflo.Port('string')
+      type: new noflo.Port('string'),
+      preventdefault: new noflo.Port('boolean')
     };
     this.outPorts = {
       element: new noflo.Port('object'),
@@ -10123,6 +10703,11 @@ Listen = (function(_super) {
         }
       };
     })(this));
+    this.inPorts.preventdefault.on('data', (function(_this) {
+      return function(data) {
+        return _this.preventDefault = data;
+      };
+    })(this));
   }
 
   Listen.prototype.unsubscribe = function(element, type) {
@@ -10134,6 +10719,9 @@ Listen = (function(_super) {
   };
 
   Listen.prototype.change = function(event) {
+    if (this.preventDefault) {
+      event.preventDefault();
+    }
     if (this.outPorts.element.isAttached()) {
       this.outPorts.element.send(this.element);
     }
@@ -10153,13 +10741,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/ReadHtml.js", function(exports, require, module){
 var ReadHtml, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-ReadHtml = (function(_super) {
-  __extends(ReadHtml, _super);
+ReadHtml = (function(superClass) {
+  extend(ReadHtml, superClass);
 
   ReadHtml.prototype.description = 'Read HTML from an existing element';
 
@@ -10189,13 +10777,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/RemoveElement.js", function(exports, require, module){
 var RemoveElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-RemoveElement = (function(_super) {
-  __extends(RemoveElement, _super);
+RemoveElement = (function(superClass) {
+  extend(RemoveElement, superClass);
 
   RemoveElement.prototype.description = 'Remove an element from DOM';
 
@@ -10203,14 +10791,12 @@ RemoveElement = (function(_super) {
     this.inPorts = {
       element: new noflo.Port('object')
     };
-    this.inPorts.element.on('data', (function(_this) {
-      return function(element) {
-        if (!element.parentNode) {
-          return;
-        }
-        return element.parentNode.removeChild(element);
-      };
-    })(this));
+    this.inPorts.element.on('data', function(element) {
+      if (!element.parentNode) {
+        return;
+      }
+      return element.parentNode.removeChild(element);
+    });
   }
 
   return RemoveElement;
@@ -10223,96 +10809,73 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-dom/components/SetAttribute.js", function(exports, require, module){
-var SetAttribute, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+'use strict';
+var noflo;
 
 noflo = require('noflo');
 
-SetAttribute = (function(_super) {
-  __extends(SetAttribute, _super);
-
-  function SetAttribute() {
-    this.attribute = null;
-    this.value = null;
-    this.element = null;
-    this.inPorts = {
-      element: new noflo.Port('object'),
-      attribute: new noflo.Port('string'),
-      value: new noflo.Port('string')
-    };
-    this.outPorts = {
-      element: new noflo.Port('object')
-    };
-    this.inPorts.element.on('data', (function(_this) {
-      return function(element) {
-        _this.element = element;
-        if (_this.attribute && _this.value) {
-          return _this.setAttribute();
-        }
-      };
-    })(this));
-    this.inPorts.attribute.on('data', (function(_this) {
-      return function(attribute) {
-        _this.attribute = attribute;
-        if (_this.element && _this.value) {
-          return _this.setAttribute();
-        }
-      };
-    })(this));
-    this.inPorts.value.on('data', (function(_this) {
-      return function(value) {
-        _this.value = _this.normalizeValue(value);
-        if (_this.attribute && _this.element) {
-          return _this.setAttribute();
-        }
-      };
-    })(this));
-  }
-
-  SetAttribute.prototype.setAttribute = function() {
-    this.element.setAttribute(this.attribute, this.value);
-    this.value = null;
-    if (this.outPorts.element.isAttached()) {
-      this.outPorts.element.send(this.element);
-      return this.outPorts.element.disconnect();
-    }
-  };
-
-  SetAttribute.prototype.normalizeValue = function(value) {
-    var key, newVal, val;
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.description = "Set the given attribute on the DOM element to the received value.";
+  c.inPorts.add('element', {
+    datatype: 'object',
+    description: 'The element on which to set the attribute.',
+    required: true
+  });
+  c.inPorts.add('attribute', {
+    datatype: 'string',
+    description: 'The attribute which is set on the DOM element.',
+    required: true
+  });
+  c.inPorts.add('value', {
+    datatype: 'string',
+    description: 'Value of the attribute being set.'
+  });
+  c.outPorts.add('element', {
+    datatype: 'object',
+    description: 'The element that was updated.'
+  });
+  return noflo.helpers.WirePattern(c, {
+    "in": ['element', 'value'],
+    out: ['element'],
+    params: ['attribute'],
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var attr, key, newVal, val, value;
+    attr = c.params.attribute;
+    value = data.value;
     if (typeof value === 'object') {
-      if (toString.call(value) !== '[object Array]') {
+      if (toString.call(value) === '[object Array]') {
+        value = value.join(' ');
+      } else {
         newVal = [];
         for (key in value) {
           val = value[key];
           newVal.push(val);
         }
-        value = newVal;
+        value = newVal.join(' ');
       }
-      return value.join(' ');
     }
-    return value;
-  };
-
-  return SetAttribute;
-
-})(noflo.Component);
-
-exports.getComponent = function() {
-  return new SetAttribute;
+    if (attr === "value") {
+      data.element.value = value;
+    } else {
+      data.element.setAttribute(attr, value);
+    }
+    return out.send(data.element);
+  });
 };
 
 });
 require.register("noflo-noflo-dom/components/WriteHtml.js", function(exports, require, module){
 var WriteHtml, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-WriteHtml = (function(_super) {
-  __extends(WriteHtml, _super);
+WriteHtml = (function(superClass) {
+  extend(WriteHtml, superClass);
 
   WriteHtml.prototype.description = 'Write HTML inside an existing element';
 
@@ -10364,13 +10927,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/RemoveClass.js", function(exports, require, module){
 var RemoveClass, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-RemoveClass = (function(_super) {
-  __extends(RemoveClass, _super);
+RemoveClass = (function(superClass) {
+  extend(RemoveClass, superClass);
 
   RemoveClass.prototype.description = 'Remove a class from an element';
 
@@ -10415,8 +10978,8 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-dom/components/RequestAnimationFrame.js", function(exports, require, module){
 var RequestAnimationFrame, noflo, requestAnimationFrame,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
@@ -10426,8 +10989,8 @@ requestAnimationFrame = window.requestAnimationFrame || window.webkitRequestAnim
   }, 1000 / 60);
 };
 
-RequestAnimationFrame = (function(_super) {
-  __extends(RequestAnimationFrame, _super);
+RequestAnimationFrame = (function(superClass) {
+  extend(RequestAnimationFrame, superClass);
 
   RequestAnimationFrame.prototype.description = 'Sends bangs that correspond with screen refresh rate.';
 
@@ -10485,19 +11048,19 @@ require.register("noflo-noflo-core/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-core/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.8","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*"},"remotes":["https://raw.githubusercontent.com"],"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js","components/ReadGlobal.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","MakeFunction":"components/MakeFunction.js","Merge":"components/Merge.js","Output":"components/Output.js","ReadGlobal":"components/ReadGlobal.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","SendNext":"components/SendNext.js","Split":"components/Split.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-core","description":"NoFlo Essentials","repo":"noflo/noflo-core","version":"0.1.13","author":{"name":"Henri Bergius","email":"henri.bergius@iki.fi"},"contributors":[{"name":"Kenneth Kan","email":"kenhkan@gmail.com"},{"name":"Ryan Shaw","email":"ryanshaw@unc.edu"}],"keywords":[],"dependencies":{"noflo/noflo":"*","jashkenas/underscore":"1.8.3"},"remotes":["https://raw.githubusercontent.com"],"scripts":["components/Callback.js","components/DisconnectAfterPacket.js","components/Drop.js","components/Group.js","components/Kick.js","components/Merge.js","components/Output.js","components/Repeat.js","components/RepeatAsync.js","components/RepeatDelayed.js","components/SendNext.js","components/Split.js","components/RunInterval.js","components/RunTimeout.js","components/MakeFunction.js","index.js","components/ReadGlobal.js"],"json":["component.json"],"noflo":{"components":{"Callback":"components/Callback.js","DisconnectAfterPacket":"components/DisconnectAfterPacket.js","Drop":"components/Drop.js","Group":"components/Group.js","Kick":"components/Kick.js","MakeFunction":"components/MakeFunction.js","Merge":"components/Merge.js","Output":"components/Output.js","ReadGlobal":"components/ReadGlobal.js","Repeat":"components/Repeat.js","RepeatAsync":"components/RepeatAsync.js","RepeatDelayed":"components/RepeatDelayed.js","RunInterval":"components/RunInterval.js","RunTimeout":"components/RunTimeout.js","SendNext":"components/SendNext.js","Split":"components/Split.js"}}}');
 });
 require.register("noflo-noflo-core/components/Callback.js", function(exports, require, module){
-var Callback, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Callback, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
 _ = require('underscore')._;
 
-Callback = (function(_super) {
-  __extends(Callback, _super);
+Callback = (function(superClass) {
+  extend(Callback, superClass);
 
   Callback.prototype.description = 'This component calls a given callback function for each IP it receives.  The Callback component is typically used to connect NoFlo with external Node.js code.';
 
@@ -10560,13 +11123,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/DisconnectAfterPacket.js", function(exports, require, module){
 var DisconnectAfterPacket, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-DisconnectAfterPacket = (function(_super) {
-  __extends(DisconnectAfterPacket, _super);
+DisconnectAfterPacket = (function(superClass) {
+  extend(DisconnectAfterPacket, superClass);
 
   DisconnectAfterPacket.prototype.description = 'Forwards any packets, but also sends a disconnect after each of them';
 
@@ -10613,13 +11176,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/Drop.js", function(exports, require, module){
 var Drop, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Drop = (function(_super) {
-  __extends(Drop, _super);
+Drop = (function(superClass) {
+  extend(Drop, superClass);
 
   Drop.prototype.description = 'This component drops every packet it receives with no action';
 
@@ -10646,13 +11209,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/Group.js", function(exports, require, module){
 var Group, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Group = (function(_super) {
-  __extends(Group, _super);
+Group = (function(superClass) {
+  extend(Group, superClass);
 
   Group.prototype.description = 'Adds a set of groups around the packets received at each connection';
 
@@ -10684,14 +11247,14 @@ Group = (function(_super) {
     });
     this.inPorts["in"].on('connect', (function(_this) {
       return function() {
-        var group, _i, _len, _ref, _results;
-        _ref = _this.newGroups;
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          group = _ref[_i];
-          _results.push(_this.outPorts.out.beginGroup(group));
+        var group, i, len, ref, results;
+        ref = _this.newGroups;
+        results = [];
+        for (i = 0, len = ref.length; i < len; i++) {
+          group = ref[i];
+          results.push(_this.outPorts.out.beginGroup(group));
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on('begingroup', (function(_this) {
@@ -10711,10 +11274,10 @@ Group = (function(_super) {
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function() {
-        var group, _i, _len, _ref;
-        _ref = _this.newGroups;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          group = _ref[_i];
+        var group, i, len, ref;
+        ref = _this.newGroups;
+        for (i = 0, len = ref.length; i < len; i++) {
+          group = ref[i];
           _this.outPorts.out.endGroup();
         }
         _this.outPorts.out.disconnect();
@@ -10751,13 +11314,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/Kick.js", function(exports, require, module){
 var Kick, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Kick = (function(_super) {
-  __extends(Kick, _super);
+Kick = (function(superClass) {
+  extend(Kick, superClass);
 
   Kick.prototype.description = 'This component generates a single packet and sends it to the output port. Mostly usable for debugging, but can also be useful for starting up networks.';
 
@@ -10813,16 +11376,16 @@ Kick = (function(_super) {
   }
 
   Kick.prototype.sendKick = function(kick) {
-    var group, _i, _j, _len, _len1, _ref, _ref1;
-    _ref = kick.group;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
+    var group, i, j, len, len1, ref, ref1;
+    ref = kick.group;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
       this.outPorts.out.beginGroup(group);
     }
     this.outPorts.out.send(kick.packet);
-    _ref1 = kick.group;
-    for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-      group = _ref1[_j];
+    ref1 = kick.group;
+    for (j = 0, len1 = ref1.length; j < len1; j++) {
+      group = ref1[j];
       this.outPorts.out.endGroup();
     }
     return this.outPorts.out.disconnect();
@@ -10839,13 +11402,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/Merge.js", function(exports, require, module){
 var Merge, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Merge = (function(_super) {
-  __extends(Merge, _super);
+Merge = (function(superClass) {
+  extend(Merge, superClass);
 
   Merge.prototype.description = 'This component receives data on multiple input ports and sends the same data out to the connected output port';
 
@@ -10885,10 +11448,10 @@ Merge = (function(_super) {
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function() {
-        var socket, _i, _len, _ref;
-        _ref = _this.inPorts["in"].sockets;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          socket = _ref[_i];
+        var i, len, ref, socket;
+        ref = _this.inPorts["in"].sockets;
+        for (i = 0, len = ref.length; i < len; i++) {
+          socket = ref[i];
           if (socket.connected) {
             return;
           }
@@ -10908,9 +11471,7 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-core/components/Output.js", function(exports, require, module){
-var Output, noflo, util,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var log, noflo, util;
 
 noflo = require('noflo');
 
@@ -10924,83 +11485,41 @@ if (!noflo.isBrowser()) {
   };
 }
 
-Output = (function(_super) {
-  __extends(Output, _super);
-
-  Output.prototype.description = 'This component receives input on a single inport, and sends the data items directly to console.log';
-
-  Output.prototype.icon = 'bug';
-
-  function Output() {
-    this.options = null;
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'all',
-        description: 'Packet to be printed through console.log'
-      },
-      options: {
-        datatype: 'object',
-        description: 'Options to be passed to console.log'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'all'
-      }
-    });
-    this.inPorts["in"].on('data', (function(_this) {
-      return function(data) {
-        _this.log(data);
-        if (_this.outPorts.out.isAttached()) {
-          return _this.outPorts.out.send(data);
-        }
-      };
-    })(this));
-    this.inPorts["in"].on('disconnect', (function(_this) {
-      return function() {
-        if (_this.outPorts.out.isAttached()) {
-          return _this.outPorts.out.disconnect();
-        }
-      };
-    })(this));
-    this.inPorts.options.on('data', (function(_this) {
-      return function(data) {
-        return _this.setOptions(data);
-      };
-    })(this));
+log = function(options, data) {
+  if (options != null) {
+    return console.log(util.inspect(data, options.showHidden, options.depth, options.colors));
+  } else {
+    return console.log(data);
   }
-
-  Output.prototype.setOptions = function(options) {
-    var key, value, _results;
-    if (typeof options !== 'object') {
-      throw new Error('Options is not an object');
-    }
-    if (this.options == null) {
-      this.options = {};
-    }
-    _results = [];
-    for (key in options) {
-      if (!__hasProp.call(options, key)) continue;
-      value = options[key];
-      _results.push(this.options[key] = value);
-    }
-    return _results;
-  };
-
-  Output.prototype.log = function(data) {
-    if (this.options != null) {
-      return console.log(util.inspect(data, this.options.showHidden, this.options.depth, this.options.colors));
-    } else {
-      return console.log(data);
-    }
-  };
-
-  return Output;
-
-})(noflo.Component);
+};
 
 exports.getComponent = function() {
-  return new Output();
+  var c;
+  c = new noflo.Component;
+  c.description = 'Sends the data items to console.log';
+  c.icon = 'bug';
+  c.inPorts.add('in', {
+    datatype: 'all',
+    description: 'Packet to be printed through console.log'
+  });
+  c.inPorts.add('options', {
+    datatype: 'object',
+    description: 'Options to be passed to console.log'
+  });
+  c.outPorts.add('out', {
+    datatype: 'all'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": 'in',
+    out: 'out',
+    forwardGroups: true,
+    async: true
+  }, function(data, groups, out, callback) {
+    log(c.params.options, data);
+    out.send(data);
+    return callback();
+  });
+  return c;
 };
 
 });
@@ -11065,86 +11584,67 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-core/components/RepeatDelayed.js", function(exports, require, module){
-var RepeatDelayed, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo;
 
 noflo = require('noflo');
 
-RepeatDelayed = (function(_super) {
-  __extends(RepeatDelayed, _super);
-
-  RepeatDelayed.prototype.description = 'Forward packet after a set delay';
-
-  RepeatDelayed.prototype.icon = 'clock-o';
-
-  function RepeatDelayed() {
-    this.timers = [];
-    this.delay = 0;
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'all',
-        description: 'Packet to be forwarded with a delay'
-      },
-      delay: {
-        datatype: 'number',
-        description: 'How much to delay',
-        "default": 500
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'all'
-      }
-    });
-    this.inPorts.delay.on('data', (function(_this) {
-      return function(delay) {
-        _this.delay = delay;
-      };
-    })(this));
-    RepeatDelayed.__super__.constructor.call(this);
-  }
-
-  RepeatDelayed.prototype.doAsync = function(packet, callback) {
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.description = 'Forward packet after a set delay';
+  c.icon = 'clock-o';
+  c.timers = [];
+  c.inPorts.add('in', {
+    datatype: 'all',
+    description: 'Packet to be forwarded with a delay'
+  });
+  c.inPorts.add('delay', {
+    datatype: 'number',
+    description: 'How much to delay',
+    "default": 500
+  });
+  c.outPorts.add('out', {
+    datatype: 'all'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": 'in',
+    params: 'delay',
+    out: 'out',
+    forwardGroups: true,
+    async: true
+  }, function(payload, groups, out, callback) {
     var timer;
     timer = setTimeout((function(_this) {
       return function() {
-        _this.outPorts.out.send(packet);
+        out.send(payload);
         callback();
-        return _this.timers.splice(_this.timers.indexOf(timer), 1);
+        return c.timers.splice(c.timers.indexOf(timer), 1);
       };
-    })(this), this.delay);
-    return this.timers.push(timer);
-  };
-
-  RepeatDelayed.prototype.shutdown = function() {
-    var timer, _i, _len, _ref;
-    _ref = this.timers;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      timer = _ref[_i];
+    })(this), c.params.delay);
+    return c.timers.push(timer);
+  });
+  c.shutdown = function() {
+    var i, len, ref, timer;
+    ref = c.timers;
+    for (i = 0, len = ref.length; i < len; i++) {
+      timer = ref[i];
       clearTimeout(timer);
     }
-    return this.timers = [];
+    return c.timers = [];
   };
-
-  return RepeatDelayed;
-
-})(noflo.AsyncComponent);
-
-exports.getComponent = function() {
-  return new RepeatDelayed;
+  return c;
 };
 
 });
 require.register("noflo-noflo-core/components/SendNext.js", function(exports, require, module){
 var SendNext, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SendNext = (function(_super) {
-  __extends(SendNext, _super);
+SendNext = (function(superClass) {
+  extend(SendNext, superClass);
 
   SendNext.prototype.description = 'Sends next packet in buffer when receiving a bang';
 
@@ -11224,76 +11724,44 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-core/components/Split.js", function(exports, require, module){
-var Split, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var noflo;
 
 noflo = require('noflo');
 
-Split = (function(_super) {
-  __extends(Split, _super);
-
-  Split.prototype.description = 'This component receives data on a single input port and sends the same data out to all connected output ports';
-
-  Split.prototype.icon = 'expand';
-
-  function Split() {
-    this.inPorts = new noflo.InPorts({
-      "in": {
-        datatype: 'all',
-        description: 'Packet to be forwarded'
-      }
-    });
-    this.outPorts = new noflo.OutPorts({
-      out: {
-        datatype: 'all'
-      }
-    });
-    this.inPorts["in"].on('connect', (function(_this) {
-      return function() {
-        return _this.outPorts.out.connect();
-      };
-    })(this));
-    this.inPorts["in"].on('begingroup', (function(_this) {
-      return function(group) {
-        return _this.outPorts.out.beginGroup(group);
-      };
-    })(this));
-    this.inPorts["in"].on('data', (function(_this) {
-      return function(data) {
-        return _this.outPorts.out.send(data);
-      };
-    })(this));
-    this.inPorts["in"].on('endgroup', (function(_this) {
-      return function() {
-        return _this.outPorts.out.endGroup();
-      };
-    })(this));
-    this.inPorts["in"].on('disconnect', (function(_this) {
-      return function() {
-        return _this.outPorts.out.disconnect();
-      };
-    })(this));
-  }
-
-  return Split;
-
-})(noflo.Component);
-
 exports.getComponent = function() {
-  return new Split;
+  var c;
+  c = new noflo.Component;
+  c.icon = 'expand';
+  c.description = 'This component receives data on a single input port and sends the same data out to all connected output ports';
+  c.inPorts.add('in', {
+    datatype: 'all',
+    description: 'Packet to be forwarded'
+  });
+  c.outPorts.add('out', {
+    datatype: 'all'
+  });
+  noflo.helpers.WirePattern(c, {
+    "in": 'in',
+    out: 'out',
+    forwardGroups: true,
+    async: true
+  }, function(data, groups, out, callback) {
+    out.send(data);
+    return callback();
+  });
+  return c;
 };
 
 });
 require.register("noflo-noflo-core/components/RunInterval.js", function(exports, require, module){
 var RunInterval, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-RunInterval = (function(_super) {
-  __extends(RunInterval, _super);
+RunInterval = (function(superClass) {
+  extend(RunInterval, superClass);
 
   RunInterval.prototype.description = 'Send a packet at the given interval';
 
@@ -11376,13 +11844,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/RunTimeout.js", function(exports, require, module){
 var RunTimeout, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-RunTimeout = (function(_super) {
-  __extends(RunTimeout, _super);
+RunTimeout = (function(superClass) {
+  extend(RunTimeout, superClass);
 
   RunTimeout.prototype.description = 'Send a packet after the given time in ms';
 
@@ -11471,13 +11939,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-core/components/MakeFunction.js", function(exports, require, module){
 var MakeFunction, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-MakeFunction = (function(_super) {
-  __extends(MakeFunction, _super);
+MakeFunction = (function(superClass) {
+  extend(MakeFunction, superClass);
 
   MakeFunction.prototype.description = 'Evaluates a function each time data hits the "in" port and sends the return value to "out". Within the function "x" will be the variable from the in port. For example, to make a ^2 function input "return x*x;" to the function port.';
 
@@ -11616,13 +12084,13 @@ module.exports = JSON.parse('{"name":"noflo-css","description":"Cascading Style 
 });
 require.register("noflo-noflo-css/components/MoveElement.js", function(exports, require, module){
 var MoveElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-MoveElement = (function(_super) {
-  __extends(MoveElement, _super);
+MoveElement = (function(superClass) {
+  extend(MoveElement, superClass);
 
   MoveElement.prototype.description = 'Change the coordinates of a DOM element';
 
@@ -11644,18 +12112,18 @@ MoveElement = (function(_super) {
     })(this));
     this.inPorts.point.on('data', (function(_this) {
       return function(point) {
-        _this.setPosition('left', "" + point.x + "px");
-        return _this.setPosition('top', "" + point.y + "px");
+        _this.setPosition('left', point.x + "px");
+        return _this.setPosition('top', point.y + "px");
       };
     })(this));
     this.inPorts.x.on('data', (function(_this) {
       return function(x) {
-        return _this.setPosition('left', "" + x + "px");
+        return _this.setPosition('left', x + "px");
       };
     })(this));
     this.inPorts.y.on('data', (function(_this) {
       return function(y) {
-        return _this.setPosition('top', "" + y + "px");
+        return _this.setPosition('top', y + "px");
       };
     })(this));
     this.inPorts.z.on('data', (function(_this) {
@@ -11681,13 +12149,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-css/components/ResizeElement.js", function(exports, require, module){
 var ResizeElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-ResizeElement = (function(_super) {
-  __extends(ResizeElement, _super);
+ResizeElement = (function(superClass) {
+  extend(ResizeElement, superClass);
 
   ResizeElement.prototype.description = 'Change the size of a DOM element';
 
@@ -11708,18 +12176,18 @@ ResizeElement = (function(_super) {
     })(this));
     this.inPorts.size.on('data', (function(_this) {
       return function(size) {
-        _this.setPosition('width', "" + size.width + "px");
-        return _this.setPosition('height', "" + size.height + "px");
+        _this.setPosition('width', size.width + "px");
+        return _this.setPosition('height', size.height + "px");
       };
     })(this));
     this.inPorts.width.on('data', (function(_this) {
       return function(width) {
-        return _this.setPosition('width', "" + width + "px");
+        return _this.setPosition('width', width + "px");
       };
     })(this));
     this.inPorts.height.on('data', (function(_this) {
       return function(height) {
-        return _this.setPosition('height', "" + height + "px");
+        return _this.setPosition('height', height + "px");
       };
     })(this));
   }
@@ -11740,13 +12208,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-css/components/RotateElement.js", function(exports, require, module){
 var RotateElement, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-RotateElement = (function(_super) {
-  __extends(RotateElement, _super);
+RotateElement = (function(superClass) {
+  extend(RotateElement, superClass);
 
   RotateElement.prototype.description = 'Change the coordinates of a DOM element';
 
@@ -11816,13 +12284,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-css/components/SetElementTop.js", function(exports, require, module){
 var SetElementTop, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SetElementTop = (function(_super) {
-  __extends(SetElementTop, _super);
+SetElementTop = (function(superClass) {
+  extend(SetElementTop, superClass);
 
   SetElementTop.prototype.description = 'Set element\'s CSS top';
 
@@ -11845,7 +12313,7 @@ SetElementTop = (function(_super) {
           return;
         }
         _this.element.style.position = 'absolute';
-        return _this.element.style.top = "" + top + "px";
+        return _this.element.style.top = top + "px";
       };
     })(this));
   }
@@ -11861,13 +12329,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-css/components/SetBackgroundImage.js", function(exports, require, module){
 var SetBackgroundImage, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SetBackgroundImage = (function(_super) {
-  __extends(SetBackgroundImage, _super);
+SetBackgroundImage = (function(superClass) {
+  extend(SetBackgroundImage, superClass);
 
   SetBackgroundImage.prototype.description = 'Set element\'s CSS background image';
 
@@ -12247,19 +12715,19 @@ require.register("noflo-noflo-objects/index.js", function(exports, require, modu
 
 });
 require.register("noflo-noflo-objects/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"*","mrluc/owl-deepcopy":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js","components/FilterProperty.js","components/CreateError.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateError":"components/CreateError.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterProperty":"components/FilterProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-objects","description":"Object Utilities for NoFlo","version":"0.1.10","keywords":["noflo","objects","utilities"],"author":"Kenneth Kan <kenhkan@gmail.com>","repo":"noflo/objects","dependencies":{"noflo/noflo":"*","jashkenas/underscore":"1.8.3","mrluc/owl-deepcopy":"*"},"scripts":["components/Extend.js","components/MergeObjects.js","components/SplitObject.js","components/ReplaceKey.js","components/Keys.js","components/Size.js","components/Values.js","components/Join.js","components/ExtractProperty.js","components/InsertProperty.js","components/SliceArray.js","components/SplitArray.js","components/FilterPropertyValue.js","components/FlattenObject.js","components/MapProperty.js","components/RemoveProperty.js","components/MapPropertyValue.js","components/GetObjectKey.js","components/UniqueArray.js","components/SetProperty.js","components/SimplifyObject.js","components/DuplicateProperty.js","components/CreateObject.js","components/CreateDate.js","components/SetPropertyValue.js","components/CallMethod.js","index.js","components/GetCurrentTimestamp.js","components/FilterProperty.js","components/CreateError.js"],"json":["component.json"],"noflo":{"icon":"list","components":{"CallMethod":"components/CallMethod.js","CreateDate":"components/CreateDate.js","CreateError":"components/CreateError.js","CreateObject":"components/CreateObject.js","DuplicateProperty":"components/DuplicateProperty.js","Extend":"components/Extend.js","ExtractProperty":"components/ExtractProperty.js","FilterProperty":"components/FilterProperty.js","FilterPropertyValue":"components/FilterPropertyValue.js","FlattenObject":"components/FlattenObject.js","GetCurrentTimestamp":"components/GetCurrentTimestamp.js","GetObjectKey":"components/GetObjectKey.js","InsertProperty":"components/InsertProperty.js","Join":"components/Join.js","Keys":"components/Keys.js","MapProperty":"components/MapProperty.js","MapPropertyValue":"components/MapPropertyValue.js","MergeObjects":"components/MergeObjects.js","RemoveProperty":"components/RemoveProperty.js","ReplaceKey":"components/ReplaceKey.js","SetProperty":"components/SetProperty.js","SetPropertyValue":"components/SetPropertyValue.js","SimplifyObject":"components/SimplifyObject.js","Size":"components/Size.js","SliceArray":"components/SliceArray.js","SplitArray":"components/SplitArray.js","SplitObject":"components/SplitObject.js","UniqueArray":"components/UniqueArray.js","Values":"components/Values.js"}}}');
 });
 require.register("noflo-noflo-objects/components/Extend.js", function(exports, require, module){
-var Extend, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Extend, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 _ = require("underscore");
 
 noflo = require("noflo");
 
-Extend = (function(_super) {
-  __extends(Extend, _super);
+Extend = (function(superClass) {
+  extend(Extend, superClass);
 
   Extend.prototype.description = "Extend an incoming object to some predefined objects, optionally by a certain property";
 
@@ -12324,11 +12792,11 @@ Extend = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(incoming) {
-        var base, out, _i, _len, _ref;
+        var base, i, len, out, ref;
         out = {};
-        _ref = _this.bases;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          base = _ref[_i];
+        ref = _this.bases;
+        for (i = 0, len = ref.length; i < len; i++) {
+          base = ref[i];
           if ((_this.key == null) || (incoming[_this.key] != null) && incoming[_this.key] === base[_this.key]) {
             _.extend(out, base);
           }
@@ -12362,16 +12830,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/MergeObjects.js", function(exports, require, module){
-var MergeObjects, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var MergeObjects, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 _ = require("underscore");
 
 noflo = require("noflo");
 
-MergeObjects = (function(_super) {
-  __extends(MergeObjects, _super);
+MergeObjects = (function(superClass) {
+  extend(MergeObjects, superClass);
 
   MergeObjects.prototype.description = "merges all incoming objects into one";
 
@@ -12452,13 +12920,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/SplitObject.js", function(exports, require, module){
 var SplitObject, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
-SplitObject = (function(_super) {
-  __extends(SplitObject, _super);
+SplitObject = (function(superClass) {
+  extend(SplitObject, superClass);
 
   SplitObject.prototype.description = "splits a single object into multiple IPs, wrapped with the key as the group";
 
@@ -12482,15 +12950,15 @@ SplitObject = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(data) {
-        var key, value, _results;
-        _results = [];
+        var key, results, value;
+        results = [];
         for (key in data) {
           value = data[key];
           _this.outPorts.out.beginGroup(key);
           _this.outPorts.out.send(value);
-          _results.push(_this.outPorts.out.endGroup());
+          results.push(_this.outPorts.out.endGroup());
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on("endgroup", (function(_this) {
@@ -12516,13 +12984,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/ReplaceKey.js", function(exports, require, module){
 var ReplaceKey, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
-ReplaceKey = (function(_super) {
-  __extends(ReplaceKey, _super);
+ReplaceKey = (function(superClass) {
+  extend(ReplaceKey, superClass);
 
   ReplaceKey.prototype.description = "given a regexp matching any key of an incoming object as a data IP, replace the key with the provided string";
 
@@ -12555,13 +13023,13 @@ ReplaceKey = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(data) {
-        var key, newKey, pattern, replace, value, _ref;
+        var key, newKey, pattern, ref, replace, value;
         newKey = null;
         for (key in data) {
           value = data[key];
-          _ref = _this.patterns;
-          for (pattern in _ref) {
-            replace = _ref[pattern];
+          ref = _this.patterns;
+          for (pattern in ref) {
+            replace = ref[pattern];
             pattern = new RegExp(pattern);
             if (key.match(pattern) != null) {
               newKey = key.replace(pattern, replace);
@@ -12596,16 +13064,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/Keys.js", function(exports, require, module){
-var Keys, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Keys, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
 _ = require("underscore");
 
-Keys = (function(_super) {
-  __extends(Keys, _super);
+Keys = (function(superClass) {
+  extend(Keys, superClass);
 
   Keys.prototype.description = "gets only the keys of an object and forward them as an array";
 
@@ -12629,14 +13097,14 @@ Keys = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(data) {
-        var key, _i, _len, _ref, _results;
-        _ref = _.keys(data);
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          key = _ref[_i];
-          _results.push(_this.outPorts.out.send(key));
+        var i, key, len, ref, results;
+        ref = _.keys(data);
+        results = [];
+        for (i = 0, len = ref.length; i < len; i++) {
+          key = ref[i];
+          results.push(_this.outPorts.out.send(key));
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on("endgroup", (function(_this) {
@@ -12661,16 +13129,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/Size.js", function(exports, require, module){
-var Size, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Size, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
 _ = require("underscore");
 
-Size = (function(_super) {
-  __extends(Size, _super);
+Size = (function(superClass) {
+  extend(Size, superClass);
 
   Size.prototype.description = "gets the size of an object and sends that out as a number";
 
@@ -12719,16 +13187,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/Values.js", function(exports, require, module){
-var Values, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Values, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
 _ = require("underscore");
 
-Values = (function(_super) {
-  __extends(Values, _super);
+Values = (function(superClass) {
+  extend(Values, superClass);
 
   Values.prototype.description = "gets only the values of an object and forward them as an array";
 
@@ -12752,14 +13220,14 @@ Values = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(data) {
-        var value, _i, _len, _ref, _results;
-        _ref = _.values(data);
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          value = _ref[_i];
-          _results.push(_this.outPorts.out.send(value));
+        var i, len, ref, results, value;
+        ref = _.values(data);
+        results = [];
+        for (i = 0, len = ref.length; i < len; i++) {
+          value = ref[i];
+          results.push(_this.outPorts.out.send(value));
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on("endgroup", (function(_this) {
@@ -12784,16 +13252,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/Join.js", function(exports, require, module){
-var Join, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var Join, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 _ = require("underscore");
 
 noflo = require("noflo");
 
-Join = (function(_super) {
-  __extends(Join, _super);
+Join = (function(superClass) {
+  extend(Join, superClass);
 
   Join.prototype.description = "Join all values of a passed packet together as a string with a predefined delimiter";
 
@@ -12854,16 +13322,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/ExtractProperty.js", function(exports, require, module){
-var ExtractProperty, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var ExtractProperty, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
 _ = require("underscore");
 
-ExtractProperty = (function(_super) {
-  __extends(ExtractProperty, _super);
+ExtractProperty = (function(superClass) {
+  extend(ExtractProperty, superClass);
 
   ExtractProperty.prototype.description = "Given a key, return only the value matching that key in the incoming object";
 
@@ -12901,12 +13369,12 @@ ExtractProperty = (function(_super) {
     })(this));
     this.inPorts["in"].on("data", (function(_this) {
       return function(data) {
-        var key, value, _i, _len, _ref;
+        var i, key, len, ref, value;
         if ((_this.keys != null) && _.isObject(data)) {
           value = data;
-          _ref = _this.keys;
-          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-            key = _ref[_i];
+          ref = _this.keys;
+          for (i = 0, len = ref.length; i < len; i++) {
+            key = ref[i];
             value = value[key];
           }
           return _this.outPorts.out.send(value);
@@ -12935,7 +13403,7 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/InsertProperty.js", function(exports, require, module){
-var noflo, _;
+var _, noflo;
 
 noflo = require('noflo');
 
@@ -12980,13 +13448,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/SliceArray.js", function(exports, require, module){
 var SliceArray, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SliceArray = (function(_super) {
-  __extends(SliceArray, _super);
+SliceArray = (function(superClass) {
+  extend(SliceArray, superClass);
 
   function SliceArray() {
     this.begin = 0;
@@ -13071,13 +13539,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/SplitArray.js", function(exports, require, module){
 var SplitArray, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SplitArray = (function(_super) {
-  __extends(SplitArray, _super);
+SplitArray = (function(superClass) {
+  extend(SplitArray, superClass);
 
   function SplitArray() {
     this.inPorts = new noflo.InPorts({
@@ -13097,7 +13565,7 @@ SplitArray = (function(_super) {
     })(this));
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
-        var item, key, _i, _len, _results;
+        var i, item, key, len, results;
         if (toString.call(data) !== '[object Array]') {
           for (key in data) {
             item = data[key];
@@ -13107,12 +13575,12 @@ SplitArray = (function(_super) {
           }
           return;
         }
-        _results = [];
-        for (_i = 0, _len = data.length; _i < _len; _i++) {
-          item = data[_i];
-          _results.push(_this.outPorts.out.send(item));
+        results = [];
+        for (i = 0, len = data.length; i < len; i++) {
+          item = data[i];
+          results.push(_this.outPorts.out.send(item));
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on('endgroup', (function(_this) {
@@ -13138,13 +13606,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/FilterPropertyValue.js", function(exports, require, module){
 var FilterPropertyValue, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-FilterPropertyValue = (function(_super) {
-  __extends(FilterPropertyValue, _super);
+FilterPropertyValue = (function(superClass) {
+  extend(FilterPropertyValue, superClass);
 
   FilterPropertyValue.prototype.icon = 'filter';
 
@@ -13283,13 +13751,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/FlattenObject.js", function(exports, require, module){
 var FlattenObject, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-FlattenObject = (function(_super) {
-  __extends(FlattenObject, _super);
+FlattenObject = (function(superClass) {
+  extend(FlattenObject, superClass);
 
   function FlattenObject() {
     this.map = {};
@@ -13319,14 +13787,14 @@ FlattenObject = (function(_super) {
     })(this));
     this.inPorts["in"].on('data', (function(_this) {
       return function(data) {
-        var object, _i, _len, _ref, _results;
-        _ref = _this.flattenObject(data);
-        _results = [];
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          object = _ref[_i];
-          _results.push(_this.outPorts.out.send(_this.mapKeys(object)));
+        var i, len, object, ref, results;
+        ref = _this.flattenObject(data);
+        results = [];
+        for (i = 0, len = ref.length; i < len; i++) {
+          object = ref[i];
+          results.push(_this.outPorts.out.send(_this.mapKeys(object)));
         }
-        return _results;
+        return results;
       };
     })(this));
     this.inPorts["in"].on('endgroup', (function(_this) {
@@ -13352,10 +13820,10 @@ FlattenObject = (function(_super) {
   };
 
   FlattenObject.prototype.mapKeys = function(object) {
-    var key, map, _ref;
-    _ref = this.map;
-    for (key in _ref) {
-      map = _ref[key];
+    var key, map, ref;
+    ref = this.map;
+    for (key in ref) {
+      map = ref[key];
       object[map] = object.flattenedKeys[key];
     }
     delete object.flattenedKeys;
@@ -13363,14 +13831,14 @@ FlattenObject = (function(_super) {
   };
 
   FlattenObject.prototype.flattenObject = function(object) {
-    var flattened, flattenedValue, key, val, value, _i, _len;
+    var flattened, flattenedValue, i, key, len, val, value;
     flattened = [];
     for (key in object) {
       value = object[key];
       if (typeof value === 'object') {
         flattenedValue = this.flattenObject(value);
-        for (_i = 0, _len = flattenedValue.length; _i < _len; _i++) {
-          val = flattenedValue[_i];
+        for (i = 0, len = flattenedValue.length; i < len; i++) {
+          val = flattenedValue[i];
           val.flattenedKeys.push(key);
           flattened.push(val);
         }
@@ -13395,13 +13863,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/MapProperty.js", function(exports, require, module){
 var MapProperty, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-MapProperty = (function(_super) {
-  __extends(MapProperty, _super);
+MapProperty = (function(superClass) {
+  extend(MapProperty, superClass);
 
   function MapProperty() {
     this.map = {};
@@ -13471,16 +13939,16 @@ MapProperty = (function(_super) {
   };
 
   MapProperty.prototype.mapData = function(data) {
-    var expression, matched, newData, property, regexp, replacement, value, _ref;
+    var expression, matched, newData, property, ref, regexp, replacement, value;
     newData = {};
     for (property in data) {
       value = data[property];
       if (property in this.map) {
         property = this.map[property];
       }
-      _ref = this.regexps;
-      for (expression in _ref) {
-        replacement = _ref[expression];
+      ref = this.regexps;
+      for (expression in ref) {
+        replacement = ref[expression];
         regexp = new RegExp(expression);
         matched = regexp.exec(property);
         if (!matched) {
@@ -13511,16 +13979,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/RemoveProperty.js", function(exports, require, module){
-var RemoveProperty, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var RemoveProperty, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
 _ = require('underscore');
 
-RemoveProperty = (function(_super) {
-  __extends(RemoveProperty, _super);
+RemoveProperty = (function(superClass) {
+  extend(RemoveProperty, superClass);
 
   RemoveProperty.prototype.icon = 'ban';
 
@@ -13582,11 +14050,11 @@ RemoveProperty = (function(_super) {
   }
 
   RemoveProperty.prototype.removeProperties = function(object) {
-    var property, _i, _len, _ref;
+    var i, len, property, ref;
     object = _.clone(object);
-    _ref = this.properties;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      property = _ref[_i];
+    ref = this.properties;
+    for (i = 0, len = ref.length; i < len; i++) {
+      property = ref[i];
       delete object[property];
     }
     return object;
@@ -13603,13 +14071,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/MapPropertyValue.js", function(exports, require, module){
 var MapPropertyValue, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-MapPropertyValue = (function(_super) {
-  __extends(MapPropertyValue, _super);
+MapPropertyValue = (function(superClass) {
+  extend(MapPropertyValue, superClass);
 
   function MapPropertyValue() {
     this.mapAny = {};
@@ -13695,7 +14163,7 @@ MapPropertyValue = (function(_super) {
   };
 
   MapPropertyValue.prototype.mapData = function(data) {
-    var expression, matched, property, regexp, replacement, value, _ref;
+    var expression, matched, property, ref, regexp, replacement, value;
     for (property in data) {
       value = data[property];
       if (this.map[property] && this.map[property].from === value) {
@@ -13711,9 +14179,9 @@ MapPropertyValue = (function(_super) {
           data[property] = value.replace(regexp, this.regexp[property].to);
         }
       }
-      _ref = this.regexpAny;
-      for (expression in _ref) {
-        replacement = _ref[expression];
+      ref = this.regexpAny;
+      for (expression in ref) {
+        replacement = ref[expression];
         regexp = new RegExp(expression);
         matched = regexp.exec(value);
         if (!matched) {
@@ -13736,13 +14204,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/GetObjectKey.js", function(exports, require, module){
 var GetObjectKey, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-GetObjectKey = (function(_super) {
-  __extends(GetObjectKey, _super);
+GetObjectKey = (function(superClass) {
+  extend(GetObjectKey, superClass);
 
   GetObjectKey.prototype.icon = 'indent';
 
@@ -13813,7 +14281,7 @@ GetObjectKey = (function(_super) {
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function() {
-        var data, _i, _len, _ref;
+        var data, i, len, ref;
         if (!_this.data.length) {
           _this.outPorts.out.disconnect();
           _this.outPorts.object.disconnect();
@@ -13822,9 +14290,9 @@ GetObjectKey = (function(_super) {
         if (!_this.key.length) {
           return;
         }
-        _ref = _this.data;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          data = _ref[_i];
+        ref = _this.data;
+        for (i = 0, len = ref.length; i < len; i++) {
+          data = ref[i];
           _this.getKey(data);
         }
         _this.outPorts.out.disconnect();
@@ -13838,13 +14306,13 @@ GetObjectKey = (function(_super) {
     })(this));
     this.inPorts.key.on('disconnect', (function(_this) {
       return function() {
-        var data, _i, _len, _ref;
+        var data, i, len, ref;
         if (!_this.data.length) {
           return;
         }
-        _ref = _this.data;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          data = _ref[_i];
+        ref = _this.data;
+        for (i = 0, len = ref.length; i < len; i++) {
+          data = ref[i];
           _this.getKey(data);
         }
         _this.data = [];
@@ -13864,9 +14332,9 @@ GetObjectKey = (function(_super) {
     return this.outPorts.missed.disconnect();
   };
 
-  GetObjectKey.prototype.getKey = function(_arg) {
-    var data, group, groups, key, _i, _j, _k, _l, _len, _len1, _len2, _len3, _len4, _m, _ref, _results;
-    data = _arg.data, groups = _arg.groups;
+  GetObjectKey.prototype.getKey = function(arg) {
+    var data, group, groups, i, j, k, key, l, len, len1, len2, len3, len4, m, ref, results;
+    data = arg.data, groups = arg.groups;
     if (!this.key.length) {
       this.error(data, new Error('Key not defined'));
       return;
@@ -13879,15 +14347,15 @@ GetObjectKey = (function(_super) {
       this.error(data, new Error('Data is NULL'));
       return;
     }
-    _ref = this.key;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      key = _ref[_i];
+    ref = this.key;
+    for (i = 0, len = ref.length; i < len; i++) {
+      key = ref[i];
       if (data[key] === void 0) {
         this.error(data, new Error("Object has no key " + key));
         continue;
       }
-      for (_j = 0, _len1 = groups.length; _j < _len1; _j++) {
-        group = groups[_j];
+      for (j = 0, len1 = groups.length; j < len1; j++) {
+        group = groups[j];
         this.outPorts.out.beginGroup(group);
       }
       if (this.sendGroup) {
@@ -13897,22 +14365,22 @@ GetObjectKey = (function(_super) {
       if (this.sendGroup) {
         this.outPorts.out.endGroup();
       }
-      for (_k = 0, _len2 = groups.length; _k < _len2; _k++) {
-        group = groups[_k];
+      for (k = 0, len2 = groups.length; k < len2; k++) {
+        group = groups[k];
         this.outPorts.out.endGroup();
       }
     }
-    for (_l = 0, _len3 = groups.length; _l < _len3; _l++) {
-      group = groups[_l];
+    for (l = 0, len3 = groups.length; l < len3; l++) {
+      group = groups[l];
       this.outPorts.object.beginGroup(group);
     }
     this.outPorts.object.send(data);
-    _results = [];
-    for (_m = 0, _len4 = groups.length; _m < _len4; _m++) {
-      group = groups[_m];
-      _results.push(this.outPorts.object.endGroup());
+    results = [];
+    for (m = 0, len4 = groups.length; m < len4; m++) {
+      group = groups[m];
+      results.push(this.outPorts.object.endGroup());
     }
-    return _results;
+    return results;
   };
 
   return GetObjectKey;
@@ -13946,11 +14414,11 @@ exports.getComponent = function() {
     out: 'out',
     forwardGroups: true
   }, function(array, groups, out) {
-    var member, newArray, seen, _i, _len;
+    var i, len, member, newArray, seen;
     seen = {};
     newArray = [];
-    for (_i = 0, _len = array.length; _i < _len; _i++) {
-      member = array[_i];
+    for (i = 0, len = array.length; i < len; i++) {
+      member = array[i];
       seen[member] = member;
     }
     for (member in seen) {
@@ -13964,13 +14432,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/SetProperty.js", function(exports, require, module){
 var SetProperty, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SetProperty = (function(_super) {
-  __extends(SetProperty, _super);
+SetProperty = (function(superClass) {
+  extend(SetProperty, superClass);
 
   function SetProperty() {
     this.properties = {};
@@ -14027,10 +14495,10 @@ SetProperty = (function(_super) {
   };
 
   SetProperty.prototype.addProperties = function(object) {
-    var property, value, _ref;
-    _ref = this.properties;
-    for (property in _ref) {
-      value = _ref[property];
+    var property, ref, value;
+    ref = this.properties;
+    for (property in ref) {
+      value = ref[property];
       object[property] = value;
     }
     return this.outPorts.out.send(object);
@@ -14046,16 +14514,16 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/SimplifyObject.js", function(exports, require, module){
-var SimplifyObject, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var SimplifyObject, _, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
 _ = require('underscore')._;
 
-SimplifyObject = (function(_super) {
-  __extends(SimplifyObject, _super);
+SimplifyObject = (function(superClass) {
+  extend(SimplifyObject, superClass);
 
   function SimplifyObject() {
     this.inPorts = new noflo.InPorts({
@@ -14131,13 +14599,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/DuplicateProperty.js", function(exports, require, module){
 var DuplicateProperty, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-DuplicateProperty = (function(_super) {
-  __extends(DuplicateProperty, _super);
+DuplicateProperty = (function(superClass) {
+  extend(DuplicateProperty, superClass);
 
   function DuplicateProperty() {
     this.properties = {};
@@ -14205,17 +14673,17 @@ DuplicateProperty = (function(_super) {
   };
 
   DuplicateProperty.prototype.addProperties = function(object) {
-    var newValues, newprop, original, originalProp, _i, _len, _ref;
-    _ref = this.properties;
-    for (newprop in _ref) {
-      original = _ref[newprop];
+    var i, len, newValues, newprop, original, originalProp, ref;
+    ref = this.properties;
+    for (newprop in ref) {
+      original = ref[newprop];
       if (typeof original === 'string') {
         object[newprop] = object[original];
         continue;
       }
       newValues = [];
-      for (_i = 0, _len = original.length; _i < _len; _i++) {
-        originalProp = original[_i];
+      for (i = 0, len = original.length; i < len; i++) {
+        originalProp = original[i];
         newValues.push(object[originalProp]);
       }
       object[newprop] = newValues.join(this.separator);
@@ -14234,13 +14702,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/CreateObject.js", function(exports, require, module){
 var CreateObject, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-CreateObject = (function(_super) {
-  __extends(CreateObject, _super);
+CreateObject = (function(superClass) {
+  extend(CreateObject, superClass);
 
   function CreateObject() {
     this.inPorts = new noflo.InPorts({
@@ -14288,13 +14756,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/CreateDate.js", function(exports, require, module){
 var CreateDate, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
-CreateDate = (function(_super) {
-  __extends(CreateDate, _super);
+CreateDate = (function(superClass) {
+  extend(CreateDate, superClass);
 
   CreateDate.prototype.description = 'Create a new Date object from string';
 
@@ -14352,13 +14820,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/SetPropertyValue.js", function(exports, require, module){
 var SetPropertyValue, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-SetPropertyValue = (function(_super) {
-  __extends(SetPropertyValue, _super);
+SetPropertyValue = (function(superClass) {
+  extend(SetPropertyValue, superClass);
 
   function SetPropertyValue() {
     this.property = null;
@@ -14448,28 +14916,28 @@ SetPropertyValue = (function(_super) {
   }
 
   SetPropertyValue.prototype.addProperty = function(object) {
-    var group, _i, _j, _len, _len1, _ref, _ref1, _results;
+    var group, i, j, len, len1, ref, ref1, results;
     object.data[this.property] = this.value;
-    _ref = object.group;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      group = _ref[_i];
+    ref = object.group;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
       this.outPorts.out.beginGroup(group);
     }
     this.outPorts.out.send(object.data);
-    _ref1 = object.group;
-    _results = [];
-    for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-      group = _ref1[_j];
-      _results.push(this.outPorts.out.endGroup());
+    ref1 = object.group;
+    results = [];
+    for (j = 0, len1 = ref1.length; j < len1; j++) {
+      group = ref1[j];
+      results.push(this.outPorts.out.endGroup());
     }
-    return _results;
+    return results;
   };
 
   SetPropertyValue.prototype.addProperties = function() {
-    var object, _i, _len, _ref;
-    _ref = this.data;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      object = _ref[_i];
+    var i, len, object, ref;
+    ref = this.data;
+    for (i = 0, len = ref.length; i < len; i++) {
+      object = ref[i];
       this.addProperty(object);
     }
     this.data = [];
@@ -14487,13 +14955,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-objects/components/CallMethod.js", function(exports, require, module){
 var CallMethod, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
-CallMethod = (function(_super) {
-  __extends(CallMethod, _super);
+CallMethod = (function(superClass) {
+  extend(CallMethod, superClass);
 
   CallMethod.prototype.description = "call a method on an object";
 
@@ -14615,9 +15083,9 @@ exports.getComponent = function() {
 
 });
 require.register("noflo-noflo-objects/components/FilterProperty.js", function(exports, require, module){
-var FilterProperty, deepCopy, noflo, _,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+var FilterProperty, _, deepCopy, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require("noflo");
 
@@ -14625,8 +15093,8 @@ _ = require("underscore");
 
 deepCopy = require("owl-deepcopy").deepCopy;
 
-FilterProperty = (function(_super) {
-  __extends(FilterProperty, _super);
+FilterProperty = (function(superClass) {
+  extend(FilterProperty, superClass);
 
   FilterProperty.prototype.icon = 'filter';
 
@@ -14735,17 +15203,17 @@ FilterProperty = (function(_super) {
   }
 
   FilterProperty.prototype.filter = function(object) {
-    var filter, isMatched, key, match, value, _i, _len, _ref, _results;
+    var filter, i, isMatched, key, len, match, ref, results, value;
     if (_.isEmpty(object)) {
       return;
     }
-    _results = [];
+    results = [];
     for (key in object) {
       value = object[key];
       isMatched = false;
-      _ref = this.keys;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        filter = _ref[_i];
+      ref = this.keys;
+      for (i = 0, len = ref.length; i < len; i++) {
+        filter = ref[i];
         match = key.match(filter);
         if (!this.keep && match || this.keep && !match) {
           delete object[key];
@@ -14754,16 +15222,16 @@ FilterProperty = (function(_super) {
         }
       }
       if (!isMatched && _.isObject(value) && this.recurse) {
-        _results.push(this.filter(value));
+        results.push(this.filter(value));
       } else {
-        _results.push(void 0);
+        results.push(void 0);
       }
     }
-    return _results;
+    return results;
   };
 
   FilterProperty.prototype.filterData = function(object) {
-    var expression, match, newData, property, regexp, value, _i, _len, _ref;
+    var expression, i, len, match, newData, property, ref, regexp, value;
     newData = {};
     match = false;
     for (property in object) {
@@ -14773,9 +15241,9 @@ FilterProperty = (function(_super) {
         match = true;
         continue;
       }
-      _ref = this.regexps;
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        expression = _ref[_i];
+      ref = this.regexps;
+      for (i = 0, len = ref.length; i < len; i++) {
+        expression = ref[i];
         regexp = new RegExp(expression);
         if (regexp.exec(property)) {
           newData[property] = value;
@@ -14842,7 +15310,7 @@ require.register("noflo-noflo-math/index.js", function(exports, require, module)
 
 });
 require.register("noflo-noflo-math/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Accumulate.js","components/Add.js","components/Ceil.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","components/Modulo.js","components/Random.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Accumulate":"components/Accumulate.js","Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Ceil":"components/Ceil.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","Modulo":"components/Modulo.js","Multiply":"components/Multiply.js","Random":"components/Random.js","Subtract":"components/Subtract.js"}}}');
+module.exports = JSON.parse('{"name":"noflo-math","description":"Mathematical components for NoFlo","author":"Henri Bergius <henri.bergius@iki.fi>","repo":"noflo/noflo-math","version":"0.0.1","keywords":[],"dependencies":{"noflo/noflo":"*"},"scripts":["components/Accumulate.js","components/Add.js","components/Ceil.js","components/Subtract.js","components/Multiply.js","components/Divide.js","components/Floor.js","components/CalculateAngle.js","components/CalculateDistance.js","components/Compare.js","components/CountSum.js","components/MapRange.js","components/Modulo.js","components/Random.js","components/RangedRandomInt.js","components/SendNumber.js","lib/MathComponent.js","index.js"],"json":["component.json"],"noflo":{"icon":"plus-circle","components":{"Accumulate":"components/Accumulate.js","Add":"components/Add.js","CalculateAngle":"components/CalculateAngle.js","CalculateDistance":"components/CalculateDistance.js","Ceil":"components/Ceil.js","Compare":"components/Compare.js","CountSum":"components/CountSum.js","Divide":"components/Divide.js","Floor":"components/Floor.js","MapRange":"components/MapRange.js","Modulo":"components/Modulo.js","Multiply":"components/Multiply.js","Random":"components/Random.js","RangedRandomInt":"components/RangedRandomInt.js","SendNumber":"components/SendNumber.js","Subtract":"components/Subtract.js"}}}');
 });
 require.register("noflo-noflo-math/components/Accumulate.js", function(exports, require, module){
 var noflo;
@@ -14893,13 +15361,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Add.js", function(exports, require, module){
 var Add, MathComponent,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-Add = (function(_super) {
-  __extends(Add, _super);
+Add = (function(superClass) {
+  extend(Add, superClass);
 
   Add.prototype.icon = 'plus';
 
@@ -14922,13 +15390,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Ceil.js", function(exports, require, module){
 var Ceil, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Ceil = (function(_super) {
-  __extends(Ceil, _super);
+Ceil = (function(superClass) {
+  extend(Ceil, superClass);
 
   Ceil.prototype.icon = 'arrow-up';
 
@@ -14986,13 +15454,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Subtract.js", function(exports, require, module){
 var MathComponent, Subtract,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-Subtract = (function(_super) {
-  __extends(Subtract, _super);
+Subtract = (function(superClass) {
+  extend(Subtract, superClass);
 
   Subtract.prototype.icon = 'minus';
 
@@ -15015,13 +15483,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Multiply.js", function(exports, require, module){
 var MathComponent, Multiply,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-Multiply = (function(_super) {
-  __extends(Multiply, _super);
+Multiply = (function(superClass) {
+  extend(Multiply, superClass);
 
   Multiply.prototype.icon = 'asterisk';
 
@@ -15044,13 +15512,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Divide.js", function(exports, require, module){
 var Divide, MathComponent,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-Divide = (function(_super) {
-  __extends(Divide, _super);
+Divide = (function(superClass) {
+  extend(Divide, superClass);
 
   function Divide() {
     Divide.__super__.constructor.call(this, 'dividend', 'divisor', 'quotient');
@@ -15071,13 +15539,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Floor.js", function(exports, require, module){
 var Floor, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Floor = (function(_super) {
-  __extends(Floor, _super);
+Floor = (function(superClass) {
+  extend(Floor, superClass);
 
   Floor.prototype.icon = 'arrow-down';
 
@@ -15135,13 +15603,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/CalculateAngle.js", function(exports, require, module){
 var CalculateAngle, MathComponent,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-CalculateAngle = (function(_super) {
-  __extends(CalculateAngle, _super);
+CalculateAngle = (function(superClass) {
+  extend(CalculateAngle, superClass);
 
   CalculateAngle.prototype.description = 'Calculate the angle between two points';
 
@@ -15175,13 +15643,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/CalculateDistance.js", function(exports, require, module){
 var CalculateDistance, MathComponent,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-CalculateDistance = (function(_super) {
-  __extends(CalculateDistance, _super);
+CalculateDistance = (function(superClass) {
+  extend(CalculateDistance, superClass);
 
   CalculateDistance.prototype.icon = 'arrow-right';
 
@@ -15212,13 +15680,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Compare.js", function(exports, require, module){
 var Compare, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Compare = (function(_super) {
-  __extends(Compare, _super);
+Compare = (function(superClass) {
+  extend(Compare, superClass);
 
   Compare.prototype.description = 'Compare two numbers';
 
@@ -15325,13 +15793,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/CountSum.js", function(exports, require, module){
 var CountSum, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-CountSum = (function(_super) {
-  __extends(CountSum, _super);
+CountSum = (function(superClass) {
+  extend(CountSum, superClass);
 
   CountSum.prototype.description = 'Sum numbers coming from multiple inputs together';
 
@@ -15350,10 +15818,10 @@ CountSum = (function(_super) {
     })(this));
     this.inPorts["in"].on('disconnect', (function(_this) {
       return function(socket, portId) {
-        var _i, _len, _ref;
-        _ref = _this.inPorts["in"].sockets;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          socket = _ref[_i];
+        var i, len, ref;
+        ref = _this.inPorts["in"].sockets;
+        for (i = 0, len = ref.length; i < len; i++) {
+          socket = ref[i];
           if (socket.isConnected()) {
             return;
           }
@@ -15364,12 +15832,12 @@ CountSum = (function(_super) {
   }
 
   CountSum.prototype.count = function(port, data) {
-    var id, socket, sum, _i, _len, _ref;
+    var i, id, len, ref, socket, sum;
     sum = 0;
     this.portCounts[port] = data;
-    _ref = this.inPorts["in"].sockets;
-    for (id = _i = 0, _len = _ref.length; _i < _len; id = ++_i) {
-      socket = _ref[id];
+    ref = this.inPorts["in"].sockets;
+    for (id = i = 0, len = ref.length; i < len; id = ++i) {
+      socket = ref[id];
       if (typeof this.portCounts[id] === 'undefined') {
         this.portCounts[id] = 0;
       }
@@ -15387,15 +15855,71 @@ exports.getComponent = function() {
 };
 
 });
+require.register("noflo-noflo-math/components/MapRange.js", function(exports, require, module){
+var noflo;
+
+noflo = require('noflo');
+
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.icon = 'reorder';
+  c.description = 'Map a number from a source range to a target reange.';
+  c.inPorts.add('in', {
+    datatype: 'number',
+    required: true
+  });
+  c.inPorts.add('in_lower', {
+    datatype: 'number',
+    description: 'the lower bound of the input value',
+    required: true
+  });
+  c.inPorts.add('in_upper', {
+    datatype: 'number',
+    description: 'the uppwer bound of the input value',
+    required: true
+  });
+  c.inPorts.add('out_lower', {
+    datatype: 'number',
+    description: 'the lower bound of the output value',
+    required: true
+  });
+  c.inPorts.add('out_upper', {
+    datatype: 'number',
+    description: 'the uppwer bound of the output value',
+    required: true
+  });
+  c.outPorts.add('out', {
+    datatype: 'number'
+  });
+  return noflo.helpers.WirePattern(c, {
+    "in": ['in'],
+    out: ['out'],
+    params: ['in_lower', 'in_upper', 'out_lower', 'out_upper'],
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var in_lower, in_range, in_upper, out_lower, out_range, out_upper, value;
+    in_lower = Math.min(c.params.in_lower, c.params.in_upper);
+    in_upper = Math.max(c.params.in_lower, c.params.in_upper);
+    in_range = in_upper - in_lower;
+    out_lower = Math.min(c.params.out_lower, c.params.out_upper);
+    out_upper = Math.max(c.params.out_lower, c.params.out_upper);
+    out_range = out_upper - out_lower;
+    value = out_lower + ((data - in_lower) * out_range / in_range);
+    return out.send(value);
+  });
+};
+
+});
 require.register("noflo-noflo-math/components/Modulo.js", function(exports, require, module){
 var Divide, MathComponent,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 MathComponent = require('../lib/MathComponent').MathComponent;
 
-Divide = (function(_super) {
-  __extends(Divide, _super);
+Divide = (function(superClass) {
+  extend(Divide, superClass);
 
   function Divide() {
     Divide.__super__.constructor.call(this, 'dividend', 'divisor', 'remainder');
@@ -15416,13 +15940,13 @@ exports.getComponent = function() {
 });
 require.register("noflo-noflo-math/components/Random.js", function(exports, require, module){
 var Random, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
 
 noflo = require('noflo');
 
-Random = (function(_super) {
-  __extends(Random, _super);
+Random = (function(superClass) {
+  extend(Random, superClass);
 
   Random.prototype.icon = 'random';
 
@@ -15466,15 +15990,144 @@ exports.getComponent = function() {
 };
 
 });
-require.register("noflo-noflo-math/lib/MathComponent.js", function(exports, require, module){
-var MathComponent, noflo,
-  __hasProp = {}.hasOwnProperty,
-  __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+require.register("noflo-noflo-math/components/RangedRandomInt.js", function(exports, require, module){
+var noflo;
 
 noflo = require('noflo');
 
-MathComponent = (function(_super) {
-  __extends(MathComponent, _super);
+exports.getComponent = function() {
+  var c;
+  c = new noflo.Component;
+  c.icon = 'random';
+  c.description = 'Generate a random number in the given range.';
+  c.inPorts.add('in', {
+    datatype: 'bang',
+    required: true
+  });
+  c.inPorts.add('lower', {
+    datatype: 'number',
+    description: 'the lower bound',
+    required: true
+  });
+  c.inPorts.add('upper', {
+    datatype: 'number',
+    description: 'the uppwer bound',
+    required: true
+  });
+  c.outPorts.add('out', {
+    datatype: 'number'
+  });
+  return noflo.helpers.WirePattern(c, {
+    "in": ['in'],
+    out: ['out'],
+    params: ['lower', 'upper'],
+    forwardGroups: true
+  }, function(data, groups, out) {
+    var lower, range, upper, value;
+    lower = Math.min(c.params.lower, c.params.upper);
+    upper = Math.max(c.params.lower, c.params.upper);
+    range = (0.5 + upper) - lower;
+    value = lower + Math.random() * range;
+    return out.send(Math.floor(value));
+  });
+};
+
+});
+require.register("noflo-noflo-math/components/SendNumber.js", function(exports, require, module){
+var SendNumber, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
+
+noflo = require('noflo');
+
+SendNumber = (function(superClass) {
+  extend(SendNumber, superClass);
+
+  function SendNumber() {
+    this.data = {
+      number: null,
+      group: []
+    };
+    this.groups = [];
+    this.inPorts = new noflo.InPorts({
+      number: {
+        datatype: 'number'
+      },
+      "in": {
+        datatype: 'bang'
+      }
+    });
+    this.outPorts = new noflo.OutPorts({
+      out: {
+        datatype: 'number'
+      }
+    });
+    this.inPorts.number.on('data', (function(_this) {
+      return function(data) {
+        return _this.data.number = data;
+      };
+    })(this));
+    this.inPorts["in"].on('begingroup', (function(_this) {
+      return function(group) {
+        return _this.groups.push(group);
+      };
+    })(this));
+    this.inPorts["in"].on('data', (function(_this) {
+      return function(data) {
+        if (_this.data.number === null) {
+          return;
+        }
+        _this.data.group = _this.groups.slice(0);
+        return _this.sendNumber(_this.data);
+      };
+    })(this));
+    this.inPorts["in"].on('endgroup', (function(_this) {
+      return function(group) {
+        return _this.groups.pop();
+      };
+    })(this));
+    this.inPorts["in"].on('disconnect', (function(_this) {
+      return function() {
+        return _this.outPorts.out.disconnect();
+      };
+    })(this));
+  }
+
+  SendNumber.prototype.sendNumber = function(data) {
+    var group, i, j, len, len1, ref, ref1, results;
+    ref = data.group;
+    for (i = 0, len = ref.length; i < len; i++) {
+      group = ref[i];
+      this.outPorts.out.beginGroup(group);
+    }
+    this.outPorts.out.send(data.number);
+    ref1 = data.group;
+    results = [];
+    for (j = 0, len1 = ref1.length; j < len1; j++) {
+      group = ref1[j];
+      results.push(this.outPorts.out.endGroup());
+    }
+    return results;
+  };
+
+  return SendNumber;
+
+})(noflo.Component);
+
+exports.getComponent = function() {
+  return new SendNumber;
+};
+
+});
+require.register("noflo-noflo-math/lib/MathComponent.js", function(exports, require, module){
+var MathComponent, noflo,
+  extend = function(child, parent) { for (var key in parent) { if (hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+  hasProp = {}.hasOwnProperty;
+
+noflo = require('noflo');
+
+MathComponent = (function(superClass) {
+  extend(MathComponent, superClass);
 
   function MathComponent(primary, secondary, res, inputType) {
     var calculate;
@@ -15496,18 +16149,18 @@ MathComponent = (function(_super) {
     this.groups = [];
     calculate = (function(_this) {
       return function() {
-        var group, _i, _j, _len, _len1, _ref, _ref1;
-        _ref = _this.primary.group;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          group = _ref[_i];
+        var group, i, j, len, len1, ref, ref1;
+        ref = _this.primary.group;
+        for (i = 0, len = ref.length; i < len; i++) {
+          group = ref[i];
           _this.outPorts[res].beginGroup(group);
         }
         if (_this.outPorts[res].isAttached()) {
           _this.outPorts[res].send(_this.calculate(_this.primary.value, _this.secondary));
         }
-        _ref1 = _this.primary.group;
-        for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-          group = _ref1[_j];
+        ref1 = _this.primary.group;
+        for (j = 0, len1 = ref1.length; j < len1; j++) {
+          group = ref1[j];
           _this.outPorts[res].endGroup();
         }
         if (_this.outPorts[res].isConnected() && _this.primary.disconnect) {
@@ -15553,11 +16206,11 @@ MathComponent = (function(_super) {
     })(this));
     this.inPorts.clear.on('data', (function(_this) {
       return function(data) {
-        var group, _i, _len, _ref;
+        var group, i, len, ref;
         if (_this.outPorts[res].isConnected()) {
-          _ref = _this.primary.group;
-          for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-            group = _ref[_i];
+          ref = _this.primary.group;
+          for (i = 0, len = ref.length; i < len; i++) {
+            group = ref[i];
             _this.outPorts[res].endGroup();
           }
           if (_this.primary.disconnect) {
@@ -15595,7 +16248,7 @@ require.register("bar/graphs/SendJson.fbp", function(exports, require, module){
 module.exports = JSON.parse('{"processes":{"SendString":{"component":"strings/SendString"},"ParseJson":{"component":"strings/ParseJson"}},"connections":[{"src":{"process":"SendString","port":"out"},"tgt":{"process":"ParseJson","port":"in"}}],"exports":[{"private":"sendstring.string","public":"json"},{"private":"sendstring.in","public":"in"},{"private":"parsejson.out","public":"out"}]}');
 });
 require.register("bar/component.json", function(exports, require, module){
-module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.1.9","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"}},"fbp":["graphs/SendJson.fbp"]}');
+module.exports = JSON.parse('{"name":"bar","repo":"foo/bar","description":"Test project","version":"0.1.12","keywords":[],"dependencies":{"noflo/noflo":"*","noflo/noflo-dom":"*","noflo/noflo-core":"*","noflo/noflo-css":"*","noflo/noflo-objects":"*","noflo/noflo-math":"*"},"development":{},"license":"MIT","main":"index.js","scripts":["index.js","graphs/InputExample.json","graphs/Clock.json","graphs/SendJson.fbp"],"json":["component.json","graphs/InputExample.json","graphs/Clock.json"],"noflo":{"graphs":{"Clock":"graphs/Clock.json","InputExample":"graphs/InputExample.json","SendJson":"graphs/SendJson.fbp"}},"fbp":["graphs/SendJson.fbp"]}');
 });
 require.register("bar/graphs/InputExample.json", function(exports, require, module){
 module.exports = JSON.parse('{"properties":{"name":"InputExample","id":"InputExample","project":"on6d1","environment":{"type":"noflo-browser","content":"<input type=\\"text\\" id=\\"search\\" placeholder=\\"Type your query...\\">\\n<button id=\\"submit\\">Search</button>\\n<ul id=\\"results\\">\\n</ul>"}},"inports":{},"outports":{},"groups":[{"name":"Search Input","nodes":["core/Drop_oui72","core/Drop_xk1k4","core/Kick_6bw8b","dom/GetElement_qqzyh","dom/GetElement_ty501","interaction/ListenKeyboard_aioza","interaction/ListenMouse_jbbnx","math/Compare_5actd","objects/GetObjectKey_h51o8","websocket/SendMessage_bzizd"],"metadata":{"description":""}},{"name":"Write results","nodes":["core/Drop_u2w51","dom/CreateElement_x5wvz","dom/GetElement_isxye","dom/WriteHtml_q01ls","strings/SendString_1nixz","strings/SendString_r4bef","websocket/ListenMessages_nffhn"],"metadata":{"description":""}}],"processes":{"dom/GetElement_qqzyh":{"component":"dom/GetElement","metadata":{"label":"GetInput","x":180,"y":180}},"core/Drop_xk1k4":{"component":"core/Drop","metadata":{"label":"core/Drop","x":360,"y":360}},"interaction/ListenKeyboard_aioza":{"component":"interaction/ListenKeyboard","metadata":{"label":"ListenInput","x":360,"y":216}},"websocket/Connect_tfgce":{"component":"websocket/Connect","metadata":{"label":"websocket/Connect","x":756,"y":-216}},"websocket/SendMessage_bzizd":{"component":"websocket/SendMessage","metadata":{"label":"SendSearch","x":900,"y":108}},"core/Drop_46l31":{"component":"core/Drop","metadata":{"label":"core/Drop","x":756,"y":-108}},"objects/GetObjectKey_h51o8":{"component":"objects/GetObjectKey","metadata":{"label":"GetValue","x":756,"y":108}},"core/Kick_6bw8b":{"component":"core/Kick","metadata":{"label":"SendInput","x":612,"y":108}},"websocket/ListenMessages_nffhn":{"component":"websocket/ListenMessages","metadata":{"label":"ListenResults","x":936,"y":-396}},"dom/WriteHtml_q01ls":{"component":"dom/WriteHtml","metadata":{"label":"WriteResult","x":1440,"y":-396}},"dom/CreateElement_x5wvz":{"component":"dom/CreateElement","metadata":{"label":"CreateElement","x":1188,"y":-324}},"dom/GetElement_isxye":{"component":"dom/GetElement","metadata":{"label":"GetContainer","x":1080,"y":-180}},"strings/SendString_r4bef":{"component":"strings/SendString","metadata":{"label":"StartCreate","x":1080,"y":-324}},"core/Drop_u2w51":{"component":"core/Drop","metadata":{"label":"core/Drop","x":1260,"y":-180}},"math/Compare_5actd":{"component":"math/Compare","metadata":{"label":"FindEnter","x":504,"y":216}},"core/Drop_oui72":{"component":"core/Drop","metadata":{"label":"IgnoreOtherKeys","x":612,"y":360}},"dom/GetElement_ty501":{"component":"dom/GetElement","metadata":{"label":"GetButton","x":180,"y":36}},"interaction/ListenMouse_jbbnx":{"component":"interaction/ListenMouse","metadata":{"label":"ListenClick","x":360,"y":36}},"strings/SendString_1nixz":{"component":"strings/SendString","metadata":{"label":"WaitForElement","x":1296,"y":-432}}},"connections":[{"src":{"process":"dom/GetElement_qqzyh","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"interaction/ListenKeyboard_aioza","port":"element"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"connection"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"error"},"tgt":{"process":"core/Drop_46l31","port":"in"},"metadata":{"route":1}},{"src":{"process":"objects/GetObjectKey_h51o8","port":"out"},"tgt":{"process":"websocket/SendMessage_bzizd","port":"string"},"metadata":{}},{"src":{"process":"dom/GetElement_qqzyh","port":"element"},"tgt":{"process":"core/Kick_6bw8b","port":"data"},"metadata":{"route":0}},{"src":{"process":"core/Kick_6bw8b","port":"out"},"tgt":{"process":"objects/GetObjectKey_h51o8","port":"in"},"metadata":{}},{"src":{"process":"websocket/Connect_tfgce","port":"connection"},"tgt":{"process":"websocket/ListenMessages_nffhn","port":"connection"},"metadata":{"route":0}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"container"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_r4bef","port":"out"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"tagname"},"metadata":{"route":4}},{"src":{"process":"dom/GetElement_isxye","port":"element"},"tgt":{"process":"dom/CreateElement_x5wvz","port":"container"},"metadata":{"route":6}},{"src":{"process":"dom/GetElement_isxye","port":"error"},"tgt":{"process":"core/Drop_u2w51","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenKeyboard_aioza","port":"keypress"},"tgt":{"process":"math/Compare_5actd","port":"value"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"pass"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"math/Compare_5actd","port":"fail"},"tgt":{"process":"core/Drop_oui72","port":"in"},"metadata":{"route":1}},{"src":{"process":"dom/GetElement_ty501","port":"element"},"tgt":{"process":"interaction/ListenMouse_jbbnx","port":"element"},"metadata":{}},{"src":{"process":"dom/GetElement_ty501","port":"error"},"tgt":{"process":"core/Drop_xk1k4","port":"in"},"metadata":{"route":1}},{"src":{"process":"interaction/ListenMouse_jbbnx","port":"click"},"tgt":{"process":"core/Kick_6bw8b","port":"in"},"metadata":{}},{"src":{"process":"dom/CreateElement_x5wvz","port":"element"},"tgt":{"process":"strings/SendString_1nixz","port":"in"},"metadata":{"route":4}},{"src":{"process":"strings/SendString_1nixz","port":"out"},"tgt":{"process":"dom/WriteHtml_q01ls","port":"html"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_r4bef","port":"in"},"metadata":{"route":7}},{"src":{"process":"websocket/ListenMessages_nffhn","port":"string"},"tgt":{"process":"strings/SendString_1nixz","port":"string"},"metadata":{"route":7}},{"data":"#search","tgt":{"process":"dom/GetElement_qqzyh","port":"selector"}},{"data":"search","tgt":{"process":"websocket/Connect_tfgce","port":"protocol"}},{"data":"ws://127.0.0.1:8000","tgt":{"process":"websocket/Connect_tfgce","port":"url"}},{"data":"value","tgt":{"process":"objects/GetObjectKey_h51o8","port":"key"}},{"data":"li","tgt":{"process":"strings/SendString_r4bef","port":"string"}},{"data":"#results","tgt":{"process":"dom/GetElement_isxye","port":"selector"}},{"data":13,"tgt":{"process":"math/Compare_5actd","port":"comparison"}},{"data":"==","tgt":{"process":"math/Compare_5actd","port":"operator"}},{"data":"#submit","tgt":{"process":"dom/GetElement_ty501","port":"selector"}}]}');
@@ -15619,11 +16272,11 @@ module.exports = {
     "flow"
   ],
   "repo": "noflo/noflo",
-  "version": "0.5.10",
+  "version": "0.7.4",
   "dependencies": {
     "bergie/emitter": "*",
-    "jashkenas/underscore": "*",
-    "noflo/fbp": "*"
+    "jashkenas/underscore": "1.8.3",
+    "flowbased/fbp": "*"
   },
   "remotes": [
     "https://raw.githubusercontent.com"
@@ -15634,6 +16287,7 @@ module.exports = {
   "scripts": [
     "src/lib/Graph.js",
     "src/lib/InternalSocket.js",
+    "src/lib/IP.js",
     "src/lib/BasePort.js",
     "src/lib/InPort.js",
     "src/lib/OutPort.js",
@@ -15642,7 +16296,6 @@ module.exports = {
     "src/lib/ArrayPort.js",
     "src/lib/Component.js",
     "src/lib/AsyncComponent.js",
-    "src/lib/LoggingComponent.js",
     "src/lib/ComponentLoader.js",
     "src/lib/NoFlo.js",
     "src/lib/Network.js",
@@ -15662,6 +16315,7 @@ module.exports = {
     }
   }
 }
+
 });
 require.register("noflo-noflo-dom/component.json", function(exports, require, module){
 module.exports = {
@@ -15720,7 +16374,7 @@ module.exports = {
   "name": "noflo-core",
   "description": "NoFlo Essentials",
   "repo": "noflo/noflo-core",
-  "version": "0.1.8",
+  "version": "0.1.13",
   "author": {
     "name": "Henri Bergius",
     "email": "henri.bergius@iki.fi"
@@ -15738,7 +16392,7 @@ module.exports = {
   "keywords": [],
   "dependencies": {
     "noflo/noflo": "*",
-    "jashkenas/underscore": "*"
+    "jashkenas/underscore": "1.8.3"
   },
   "remotes": [
     "https://raw.githubusercontent.com"
@@ -15852,7 +16506,7 @@ module.exports = {
   "repo": "noflo/objects",
   "dependencies": {
     "noflo/noflo": "*",
-    "jashkenas/underscore": "*",
+    "jashkenas/underscore": "1.8.3",
     "mrluc/owl-deepcopy": "*"
   },
   "scripts": [
@@ -15949,8 +16603,11 @@ module.exports = {
     "components/CalculateDistance.js",
     "components/Compare.js",
     "components/CountSum.js",
+    "components/MapRange.js",
     "components/Modulo.js",
     "components/Random.js",
+    "components/RangedRandomInt.js",
+    "components/SendNumber.js",
     "lib/MathComponent.js",
     "index.js"
   ],
@@ -15969,9 +16626,12 @@ module.exports = {
       "CountSum": "components/CountSum.js",
       "Divide": "components/Divide.js",
       "Floor": "components/Floor.js",
+      "MapRange": "components/MapRange.js",
       "Modulo": "components/Modulo.js",
       "Multiply": "components/Multiply.js",
       "Random": "components/Random.js",
+      "RangedRandomInt": "components/RangedRandomInt.js",
+      "SendNumber": "components/SendNumber.js",
       "Subtract": "components/Subtract.js"
     }
   }
@@ -15987,6 +16647,7 @@ module.exports = {
 
 require.alias("noflo-noflo/src/lib/Graph.js", "bar/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "bar/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "bar/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "bar/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "bar/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "bar/deps/noflo/src/lib/OutPort.js");
@@ -15995,7 +16656,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "bar/deps/noflo/src/lib/Port.js");
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "bar/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "bar/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "bar/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "bar/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "bar/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "bar/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "bar/deps/noflo/src/lib/Network.js");
@@ -16012,9 +16672,9 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("noflo-noflo-dom/components/AddClass.js", "bar/deps/noflo-dom/components/AddClass.js");
 require.alias("noflo-noflo-dom/components/AppendChild.js", "bar/deps/noflo-dom/components/AppendChild.js");
@@ -16034,6 +16694,7 @@ require.alias("noflo-noflo-dom/index.js", "bar/deps/noflo-dom/index.js");
 require.alias("noflo-noflo-dom/index.js", "noflo-dom/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-dom/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-dom/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "noflo-noflo-dom/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "noflo-noflo-dom/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "noflo-noflo-dom/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "noflo-noflo-dom/deps/noflo/src/lib/OutPort.js");
@@ -16042,7 +16703,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "noflo-noflo-dom/deps/noflo/src/lib
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "noflo-noflo-dom/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "noflo-noflo-dom/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "noflo-noflo-dom/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "noflo-noflo-dom/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "noflo-noflo-dom/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-dom/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "noflo-noflo-dom/deps/noflo/src/lib/Network.js");
@@ -16058,9 +16718,9 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("noflo-noflo-core/components/Callback.js", "bar/deps/noflo-core/components/Callback.js");
 require.alias("noflo-noflo-core/components/DisconnectAfterPacket.js", "bar/deps/noflo-core/components/DisconnectAfterPacket.js");
@@ -16082,6 +16742,7 @@ require.alias("noflo-noflo-core/components/ReadGlobal.js", "bar/deps/noflo-core/
 require.alias("noflo-noflo-core/index.js", "noflo-core/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-core/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-core/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "noflo-noflo-core/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "noflo-noflo-core/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "noflo-noflo-core/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "noflo-noflo-core/deps/noflo/src/lib/OutPort.js");
@@ -16090,7 +16751,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "noflo-noflo-core/deps/noflo/src/li
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "noflo-noflo-core/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "noflo-noflo-core/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "noflo-noflo-core/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "noflo-noflo-core/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "noflo-noflo-core/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-core/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "noflo-noflo-core/deps/noflo/src/lib/Network.js");
@@ -16106,9 +16766,9 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-core/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-core/deps/underscore/index.js");
@@ -16122,6 +16782,7 @@ require.alias("noflo-noflo-css/components/SetBackgroundImage.js", "bar/deps/nofl
 require.alias("noflo-noflo-css/index.js", "noflo-css/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-css/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-css/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "noflo-noflo-css/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "noflo-noflo-css/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "noflo-noflo-css/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "noflo-noflo-css/deps/noflo/src/lib/OutPort.js");
@@ -16130,7 +16791,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "noflo-noflo-css/deps/noflo/src/lib
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "noflo-noflo-css/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "noflo-noflo-css/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "noflo-noflo-css/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "noflo-noflo-css/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "noflo-noflo-css/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-css/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "noflo-noflo-css/deps/noflo/src/lib/Network.js");
@@ -16146,9 +16806,9 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("noflo-noflo-objects/components/Extend.js", "bar/deps/noflo-objects/components/Extend.js");
 require.alias("noflo-noflo-objects/components/MergeObjects.js", "bar/deps/noflo-objects/components/MergeObjects.js");
@@ -16183,6 +16843,7 @@ require.alias("noflo-noflo-objects/components/CreateError.js", "bar/deps/noflo-o
 require.alias("noflo-noflo-objects/index.js", "noflo-objects/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-objects/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-objects/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "noflo-noflo-objects/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "noflo-noflo-objects/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "noflo-noflo-objects/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "noflo-noflo-objects/deps/noflo/src/lib/OutPort.js");
@@ -16191,7 +16852,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "noflo-noflo-objects/deps/noflo/src
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "noflo-noflo-objects/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "noflo-noflo-objects/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "noflo-noflo-objects/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "noflo-noflo-objects/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "noflo-noflo-objects/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-objects/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "noflo-noflo-objects/deps/noflo/src/lib/Network.js");
@@ -16207,9 +16867,9 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-objects/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo-objects/deps/underscore/index.js");
@@ -16228,13 +16888,17 @@ require.alias("noflo-noflo-math/components/CalculateAngle.js", "bar/deps/noflo-m
 require.alias("noflo-noflo-math/components/CalculateDistance.js", "bar/deps/noflo-math/components/CalculateDistance.js");
 require.alias("noflo-noflo-math/components/Compare.js", "bar/deps/noflo-math/components/Compare.js");
 require.alias("noflo-noflo-math/components/CountSum.js", "bar/deps/noflo-math/components/CountSum.js");
+require.alias("noflo-noflo-math/components/MapRange.js", "bar/deps/noflo-math/components/MapRange.js");
 require.alias("noflo-noflo-math/components/Modulo.js", "bar/deps/noflo-math/components/Modulo.js");
 require.alias("noflo-noflo-math/components/Random.js", "bar/deps/noflo-math/components/Random.js");
+require.alias("noflo-noflo-math/components/RangedRandomInt.js", "bar/deps/noflo-math/components/RangedRandomInt.js");
+require.alias("noflo-noflo-math/components/SendNumber.js", "bar/deps/noflo-math/components/SendNumber.js");
 require.alias("noflo-noflo-math/lib/MathComponent.js", "bar/deps/noflo-math/lib/MathComponent.js");
 require.alias("noflo-noflo-math/index.js", "bar/deps/noflo-math/index.js");
 require.alias("noflo-noflo-math/index.js", "noflo-math/index.js");
 require.alias("noflo-noflo/src/lib/Graph.js", "noflo-noflo-math/deps/noflo/src/lib/Graph.js");
 require.alias("noflo-noflo/src/lib/InternalSocket.js", "noflo-noflo-math/deps/noflo/src/lib/InternalSocket.js");
+require.alias("noflo-noflo/src/lib/IP.js", "noflo-noflo-math/deps/noflo/src/lib/IP.js");
 require.alias("noflo-noflo/src/lib/BasePort.js", "noflo-noflo-math/deps/noflo/src/lib/BasePort.js");
 require.alias("noflo-noflo/src/lib/InPort.js", "noflo-noflo-math/deps/noflo/src/lib/InPort.js");
 require.alias("noflo-noflo/src/lib/OutPort.js", "noflo-noflo-math/deps/noflo/src/lib/OutPort.js");
@@ -16243,7 +16907,6 @@ require.alias("noflo-noflo/src/lib/Port.js", "noflo-noflo-math/deps/noflo/src/li
 require.alias("noflo-noflo/src/lib/ArrayPort.js", "noflo-noflo-math/deps/noflo/src/lib/ArrayPort.js");
 require.alias("noflo-noflo/src/lib/Component.js", "noflo-noflo-math/deps/noflo/src/lib/Component.js");
 require.alias("noflo-noflo/src/lib/AsyncComponent.js", "noflo-noflo-math/deps/noflo/src/lib/AsyncComponent.js");
-require.alias("noflo-noflo/src/lib/LoggingComponent.js", "noflo-noflo-math/deps/noflo/src/lib/LoggingComponent.js");
 require.alias("noflo-noflo/src/lib/ComponentLoader.js", "noflo-noflo-math/deps/noflo/src/lib/ComponentLoader.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo-math/deps/noflo/src/lib/NoFlo.js");
 require.alias("noflo-noflo/src/lib/Network.js", "noflo-noflo-math/deps/noflo/src/lib/Network.js");
@@ -16259,8 +16922,8 @@ require.alias("bergie-emitter/index.js", "noflo-noflo/deps/events/index.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/underscore.js");
 require.alias("jashkenas-underscore/underscore.js", "noflo-noflo/deps/underscore/index.js");
 require.alias("jashkenas-underscore/underscore.js", "jashkenas-underscore/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
-require.alias("noflo-fbp/lib/fbp.js", "noflo-fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/lib/fbp.js");
+require.alias("flowbased-fbp/lib/fbp.js", "noflo-noflo/deps/fbp/index.js");
+require.alias("flowbased-fbp/lib/fbp.js", "flowbased-fbp/index.js");
 require.alias("noflo-noflo/src/lib/NoFlo.js", "noflo-noflo/index.js");
 require.alias("bar/index.js", "bar/index.js");
