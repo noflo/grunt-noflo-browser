@@ -31,7 +31,10 @@
         return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
       }
 
-      noflo.graph.loadJSON(require('<%= graphPath %>'), function (graph) {
+      noflo.graph.loadJSON(require('<%= graphPath %>'), function (err, graph) {
+        if (arguments.length == 1) {
+          graph = err; // compat with NoFlo 0.5.x
+        }
         graph.baseDir = '/<%= lib %>';
 
         var queryProtocol = getParameterByName('fbp_protocol');
