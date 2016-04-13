@@ -1,8 +1,14 @@
 language: node_js
 node_js:
-  - "0.10"
-
+- '0.10'
 before_script:
-  - npm install -g grunt-cli
-
+- npm install -g grunt-cli
 script: grunt test
+deploy:
+  provider: npm
+  email: jononor@gmail.com
+  api_key:
+    secure: XPKRj9R1USFkMDbUMSJ99dHyuxkGwnXJSk4tf/Lr4K+YrsKMMT2h8GqPbOThXUHsJfQva7NmA+q9APP+t8SEcRzlYw6XvHO+Poq1rq+Mo1KyYy3/cIDiZiqDsbFBmL53CZloAZaKWfza2ea4rWqKDsh4KptNw7bCFNqlM+WOkPU=
+  on:
+    tags: true
+    repo: noflo/grunt-noflo-browser
