@@ -96,6 +96,7 @@ module.exports = function(grunt) {
 
           var webpackConfig = options.webpack;
           webpackConfig.plugins.push(new webpack.NormalModuleReplacementPlugin(/\.\/loader\/register/, require.resolve(loaderPath)));
+          webpackConfig.plugins.push(new webpack.IgnorePlugin(/tv4/));
           webpackConfig.output = {
             path: path.dirname(f.dest),
             filename: path.basename(f.dest)
@@ -104,8 +105,7 @@ module.exports = function(grunt) {
           webpackConfig.entry = entryPath;
           if (webpackConfig.target !== 'node') {
             webpackConfig.node = {
-              fs: 'empty',
-              tv4: 'empty'
+              fs: 'empty'
             };
           }
 
