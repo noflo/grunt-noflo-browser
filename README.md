@@ -2,6 +2,8 @@
 
 > Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them. It uses [Webpack](https://webpack.github.io/) for building.
 
+grunt-noflo-browser can also be used for creating single-file executable bundles of Node.js projects. This can increase start-up time, especially in constrained environments.
+
 ## Getting Started
 This plugin requires Grunt `~0.4.1`
 
@@ -36,6 +38,28 @@ grunt.initConfig({
 ```
 
 ### Options
+
+#### options.graph
+Type: `String`
+Default value: `null`
+
+Setting this to the component name of a graph scopes the build to only include dependencies of that graph. If set to null, all available components will be included.
+
+#### options.webpack
+Type: `Object`
+
+[Webpack configuration options](http://webpack.github.io/docs/configuration.html) to use with the build.
+
+#### options.ignores
+Type: `Array`
+Default value: `[/tv4/]`
+
+List of regular expressions matching modules to ignore in the build. Can be used to remove optional dependencies.
+
+#### options.manifest
+Type: `Object`
+
+Custom options to pass to [fbp-manifest](https://github.com/flowbased/fbp-manifest) at component discovery stage.
 
 #### options.development
 Type: `Boolean`
