@@ -1,0 +1,28 @@
+{
+  "name": "bar",
+  "description": "Test project",
+  "version": "0.1.14",
+  "homepage": "https://github.com/noflo/grunt-noflo-browser",
+  "author": {
+    "name": "Henri Bergius",
+    "email": "henri.bergius@iki.fi",
+    "url": "http://bergie.iki.fi"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "dependencies": {
+    "noflo": "0.x >= 0.7",
+    "noflo-math": "^0.0.8",
+    "noflo-core": "^0.2.3",
+    "noflo-objects": "^0.1.14",
+    "noflo-dom": "^0.1.1",
+    "noflo-css": "^0.0.1"
+  },
+  "devDependencies": {
+  },
+  "keywords": [
+    "noflo"
+  ]
+}
