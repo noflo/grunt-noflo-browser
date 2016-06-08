@@ -40,15 +40,29 @@ var serialize = function(modules, options) {
   return contents;
 };
 
-module.exports = function (options, callback) {
+exports.discover = function (options, callback) {
   var manifestOptions = options.manifest;
-  return fbpManifest.load.load(options.baseDir, manifestOptions, function(err, manifest) {
+  fbpManifest.load.load(options.baseDir, manifestOptions, function(err, manifest) {
     if (err) {
       return callback(err);
     }
-    return filterDependencies(manifest.modules, options, function(err, modules) {
+    filterDependencies(manifest.modules, options, function(err, modules) {
       var contents = serialize(modules, options);
-      return callback(err, contents);
+      callback(err, contents);
     });
   });
+  return;
+};
+
+exports.save = function (components, grunt, options) {
+  var template = grunt.file.read(path.resolve(__dirname, '../templates/componentloader.js'));
+  var customLoader = grunt.template.process(template, {
+    data: {
+      components: components
+    }
+  });
+
+  var loaderPath = path.resolve(options.baseDir, options.destName + '.loader.js');
+  grunt.file.write(loaderPath, customLoader);
+  return loaderPath;
 };

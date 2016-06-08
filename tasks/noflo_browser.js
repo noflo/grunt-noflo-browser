@@ -9,17 +9,15 @@
 'use strict';
 
 var path = require('path');
-var webpack = require('webpack');
+var webpack = require('../src/webpack');
 var createDemos = require('../src/create_demos');
 var buildLoader = require('../src/build_loader');
+var bluebird = require('bluebird');
+var clone = require('clone');
 
 module.exports = function(grunt) {
   grunt.registerMultiTask('noflo_browser', 'Grunt plugin for building NoFlo projects for the browser', function() {
     var options = this.options({
-      development: false,
-      debug: false,
-      ide: 'https://app.flowhub.io',
-      signalserver: 'https://api.flowhub.io',
       // Default options for WebPack
       webpack: {
         module: {
@@ -32,125 +30,98 @@ module.exports = function(grunt) {
         resolve: {
           extensions: ["", ".coffee", ".js"],
         },
+        entry: null,
         target: 'web',
-        externals: {
-        },
+        externals: {},
         plugins: []
       },
+      // Modules that should be completely ignored
+      ignores: [
+        /tv4/
+      ],
+      // Files that can be used as entry files
+      directEntries: ['.js', '.coffee'],
       // Default options for fbp-manifest
       manifest: {
         runtimes: ['noflo'],
         discover: true,
         recursive: true
       },
+      // Runtime filtering options
       runtimes: ['noflo', 'noflo-browser'],
+      // Options for demo files
       graph_scripts: [],
       heads: [],
+      development: false,
+      debug: false,
+      ide: 'https://app.flowhub.io',
+      signalserver: 'https://api.flowhub.io'
     });
 
     // Force task to async mode
     var done = this.async();
-    var todo = 0;
-
-    var templateName = (options.debug) ? "graphDebug" : "graph";
-    var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
-    var componentLoaderTemplate = grunt.file.read(path.resolve(__dirname, '../templates/componentloader.js'));
 
     // Iterate over all specified file groups.
-    var handled = [];
-    this.files.forEach(function(f) {
-      var src = f.src.map(function (filepath) {
-        // Turn possible legacy-style filenames to baseDirs
-        if (grunt.file.isFile(filepath)) {
-          filepath = path.dirname(filepath);
-        }
-        return path.resolve(process.cwd(), filepath);
-      }).filter(function(filepath) {
-        // Check that the directory exists
-        if (!grunt.file.isDir(filepath)) {
-          grunt.log.warn('Base directory "' + filepath + '" not found.');
-          return false;
-        }
-        return true;
-      });
-      
-      src.forEach(function (baseDir) {
-        todo++;
-        options.baseDir = baseDir;
-        buildLoader(options, function (err, components) {
-          if (err) {
-            todo--;
-            grunt.fail.warn(err);
-            return;
-          }
-          var customLoader = grunt.template.process(componentLoaderTemplate, {
-            data: {
-              components: components
-            }
-          });
+    bluebird.map(this.files, function (f) {
+      var fileOptions = clone(options);
+      fileOptions.destName = path.basename(f.dest, path.extname(f.dest));
+      fileOptions.destDir = path.resolve(process.cwd(), path.dirname(f.dest));
 
-          var loaderPath = path.resolve(baseDir, path.basename(f.dest, path.extname(f.dest)) + '.loader.js');
-          var entryPath = path.resolve(baseDir, path.basename(f.dest, path.extname(f.dest)) + '.entry.js');
-          grunt.file.write(loaderPath, customLoader);
+      return bluebird.map(f.src, function (filepath) {
+        return new bluebird.Promise(function (resolve) {
+          if (grunt.file.isDir(filepath)) {
+            fileOptions.baseDir = path.resolve(process.cwd(), filepath);
+          } else {
+            fileOptions.baseDir = path.resolve(process.cwd(), path.dirname(filepath));
+          }
+
+          // Check if the file can be used as an entry as-is
+          if (webpack.isDirectEntry(filepath, grunt, fileOptions)) {
+            fileOptions.directEntry = true;
+            return resolve(filepath);
+          }
+
+          // No usable entry file found, create from template
+          var entryPath = path.resolve(fileOptions.baseDir, fileOptions.destName + '.entry.js');
           grunt.file.copy(path.resolve(__dirname, '../templates/entry.js'), entryPath);
+          return resolve(entryPath);
+        }).then(function (entryPath) {
+          fileOptions.webpack.entry = entryPath;
+          var discover = bluebird.promisify(buildLoader.discover);
+          return discover(fileOptions);
+        }).then(function (components) {
+          fileOptions.loaderPath = buildLoader.save(components, grunt, fileOptions);
 
-          var webpackConfig = options.webpack;
-          webpackConfig.plugins.push(new webpack.NormalModuleReplacementPlugin(/\.\/loader\/register/, require.resolve(loaderPath)));
-          webpackConfig.plugins.push(new webpack.IgnorePlugin(/tv4/));
-          webpackConfig.output = {
-            path: path.dirname(f.dest),
-            filename: path.basename(f.dest)
-          };
-          webpackConfig.context = baseDir;
-          webpackConfig.entry = entryPath;
-          if (webpackConfig.target !== 'node') {
-            webpackConfig.node = {
-              fs: 'empty'
-            };
+          var config = webpack.configure(fileOptions);
+          return bluebird.promisify(webpack.run)(config)
+        }).then(function () {
+          grunt.file.delete(fileOptions.loaderPath);
+          if (!fileOptions.isDirectEntry) {
+            grunt.file.delete(fileOptions.webpack.entry);
           }
-
-          webpack(webpackConfig).run(function (err, stats) {
-            grunt.file.delete(entryPath);
-            grunt.file.delete(loaderPath);
-            if (err) {
-              todo--;
-              grunt.fail.warn(err);
-              return;
-            }
-            var statsJson = stats.toJson();
-            if (stats.hasErrors()) {
-              todo--;
-              statsJson.errors.forEach(function (e) {
-                grunt.log.writeln(e);
-              });
-              grunt.fail.warn(statsJson.errors.length + ' errors building ' + baseDir);
-              return;
-            }
-            if (stats.hasWarnings()) {
-              console.log('WARN');
-              statsJson.warnings.forEach(function (w) {
-                grunt.log.writeln(w);
-              });
-            }
-            console.log(stats.toString({
-              colors: true
-            }));
-            todo--;
-            if (todo === 0) {
-              done();
-            }
-          });
-
+          return bluebird.resolve(null);
         });
-        /*
+      });
+    })
+    .nodeify(function (err, res) {
+      if (err) {
+        grunt.fail.warn(err);
+        return;
+      }
+      done();
+    });
+    return;
+    /*
              TODO: createDemos
+            var templateName = (options.debug) ? "graphDebug" : "graph";
+            var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
             if (!manifest.noflo || !manifest.noflo.graphs) {
               return;
             }
             Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
             writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
-            */
       });
     });
+            */
   });
 };
