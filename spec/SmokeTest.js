@@ -7,6 +7,9 @@ describe('A browser-built module', function () {
     noflo = require('noflo');
     chai.expect(noflo.ComponentLoader).to.be.a('function');
   });
+  it('should know this is browser', function () {
+    chai.expect(noflo.isBrowser()).to.equal(true);
+  });
   describe('The built NoFlo', function () {
     var instance;
     it('should be able to load a component', function (done) {
