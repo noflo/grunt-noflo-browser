@@ -18,6 +18,8 @@ var clone = require('clone');
 module.exports = function(grunt) {
   grunt.registerMultiTask('noflo_browser', 'Grunt plugin for building NoFlo projects for the browser', function() {
     var options = this.options({
+      // Provide a graph component name to scope the build only to include its dependencies
+      graph: null,
       // Default options for WebPack
       webpack: {
         module: {
