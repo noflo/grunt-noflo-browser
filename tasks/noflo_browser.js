@@ -8,28 +8,44 @@
 
 'use strict';
 
-var Installer = require('component-installer');
-var Builder = require('component-builder');
 var path = require('path');
+var webpack = require('webpack');
+var createDemos = require('../src/create_demos');
+var buildLoader = require('../src/build_loader');
 
 module.exports = function(grunt) {
-
   grunt.registerMultiTask('noflo_browser', 'Grunt plugin for building NoFlo projects for the browser', function() {
     var options = this.options({
-      require: true,
       development: false,
       debug: false,
       ide: 'https://app.flowhub.io',
       signalserver: 'https://api.flowhub.io',
-      concurrency: 10,
-      plugins: [
-        'component-json',
-        'component-coffee',
-        'component-fbp'
-      ],
-      remotes: [],
+      // Default options for WebPack
+      webpack: {
+        module: {
+          loaders: [
+            { test: /\.coffee$/, loader: "coffee-loader" },
+            { test: /\.json$/, loader: "json-loader" },
+            { test: /\.fbp$/, loader: "fbp-loader" }
+          ],
+        },
+        resolve: {
+          extensions: ["", ".coffee", ".js"],
+        },
+        target: 'web',
+        externals: {
+        },
+        plugins: []
+      },
+      // Default options for fbp-manifest
+      manifest: {
+        runtimes: ['noflo'],
+        discover: true,
+        recursive: true
+      },
+      runtimes: ['noflo', 'noflo-browser'],
       graph_scripts: [],
-      heads: []
+      heads: [],
     });
 
     // Force task to async mode
@@ -38,140 +54,111 @@ module.exports = function(grunt) {
 
     var templateName = (options.debug) ? "graphDebug" : "graph";
     var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
-    var writeGraphFiles = function (manifest, scripts, srcDir, destDir, destPath) {
-      if (!manifest.noflo || !manifest.noflo.graphs) {
-        return;
-      }
-      Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
-        if (path.extname(manifest.noflo.graphs[graphName]) !== '.json') {
-          return;
-        }
-        var graph = grunt.file.readJSON(path.resolve(srcDir, manifest.noflo.graphs[graphName]));
-        if (!graph.properties.environment || !graph.properties.environment.type || graph.properties.environment.type !== 'noflo-browser') {
-          return;
-        }
-
-        if (!graph.properties.environment.content) {
-          return;
-        }
-        var templated = grunt.template.process(graphFileTemplate, {
-          data: {
-            name: graphName,
-            scripts: scripts,
-            lib: manifest.name,
-            ideUrl: options.ide,
-            signalServer: options.signalserver,
-            noflo: destPath,
-            graphPath: manifest.name + '/' + manifest.noflo.graphs[graphName],
-            content: graph.properties.environment.content,
-            heads: options.heads
-          }
-        });
-        var demoFile = path.resolve(destDir, graphName + '.html');
-        grunt.file.write(demoFile, templated);
-        grunt.log.writeln('Demo file "' + demoFile + '" built');
-      });
-    };
+    var componentLoaderTemplate = grunt.file.read(path.resolve(__dirname, '../templates/componentloader.js'));
 
     // Iterate over all specified file groups.
+    var handled = [];
     this.files.forEach(function(f) {
-      var src = f.src.filter(function(filepath) {
-        // Warn on and remove invalid source files (if nonull was set).
-        if (!grunt.file.exists(filepath)) {
-          grunt.log.warn('Source file "' + filepath + '" not found.');
+      var src = f.src.map(function (filepath) {
+        // Turn possible legacy-style filenames to baseDirs
+        if (grunt.file.isFile(filepath)) {
+          filepath = path.dirname(filepath);
+        }
+        return path.resolve(process.cwd(), filepath);
+      }).filter(function(filepath) {
+        // Check that the directory exists
+        if (!grunt.file.isDir(filepath)) {
+          grunt.log.warn('Base directory "' + filepath + '" not found.');
           return false;
-        } else {
-          return true;
         }
-      }).forEach(function (manifestPath) {
+        return true;
+      });
+      
+      src.forEach(function (baseDir) {
         todo++;
-        var manifestDir =  path.resolve(process.cwd(), path.dirname(manifestPath));
-
-        var installer = new Installer(manifestDir);
-        installer.concurrency(options.concurrency);
-        installer.destination(path.resolve(manifestDir, 'components/'));
-
-        options.remotes.forEach(function (remote) {
-          installer.remote(remote);
-        });
-
-        if (options.development) {
-          installer.development();
-        }
-
-        installer.on('package', function (pkg) {
-          if (pkg.inFlight) {
-            return;
-          }
-          grunt.log.writeln('install ' + pkg.slug);
-
-          pkg.on('error', function (err){
-            if (err.fatal) {
-              grunt.fail.warn(err);
-              return;
-            }
-            grunt.log.error(err);
-          });
-
-          pkg.on('exists', function (dep){
-            grunt.verbose.writeln('exists ' + dep.slug);
-          });
-
-          pkg.on('end', function() {
-            grunt.log.writeln(pkg.name + ' complete');
-          });
-        });
-
-        installer.install(function (err) {
+        options.baseDir = baseDir;
+        buildLoader(options, function (err, components) {
           if (err) {
+            todo--;
             grunt.fail.warn(err);
             return;
           }
-
-          var builder = new Builder(manifestDir); 
-          builder.copyAssetsTo(path.resolve(process.cwd(), path.dirname(f.dest)));
-
-          // Load plugins
-          options.plugins.forEach(function (plugin) {
-            builder.use(require(plugin));
+          var customLoader = grunt.template.process(componentLoaderTemplate, {
+            data: {
+              components: components
+            }
           });
 
-          if (options.development) {
-            builder.development();
-            builder.addSourceURLs();
-          }
+          var loaderPath = path.resolve(baseDir, path.basename(f.dest, path.extname(f.dest)) + '.loader.js');
+          var entryPath = path.resolve(baseDir, path.basename(f.dest, path.extname(f.dest)) + '.entry.js');
+          grunt.file.write(loaderPath, customLoader);
+          grunt.file.copy(path.resolve(__dirname, '../templates/entry.js'), entryPath);
 
-          builder.build(function (err, obj) {
+          var webpackConfig = options.webpack;
+          webpackConfig.plugins.push(new webpack.NormalModuleReplacementPlugin(/\.\/loader\/register/, require.resolve(loaderPath)));
+          webpackConfig.output = {
+            path: path.dirname(f.dest),
+            filename: path.basename(f.dest)
+          };
+          webpackConfig.context = baseDir;
+          /*
+          webpackConfig.resolve = {
+            root: [
+              path.resolve(process.cwd(), path.dirname(f.dest)),
+              baseDir,
+              path.resolve(baseDir, 'node_modules/')
+            ],
+            extensions: ["", ".coffee", ".js"]
+          };*/
+          webpackConfig.entry = entryPath;
+          if (webpackConfig.target !== 'node') {
+            webpackConfig.node = {
+              fs: 'empty'
+            };
+          }
+          console.log(webpackConfig);
+
+          webpack(webpackConfig).run(function (err, stats) {
+            grunt.file.delete(entryPath);
+            grunt.file.delete(loaderPath);
             if (err) {
+              todo--;
               grunt.fail.warn(err);
               return;
             }
-
-            var js = '';
-
-            if (options.require) {
-              js += obj.require;
+            var statsJson = stats.toJson();
+            if (stats.hasErrors()) {
+              todo--;
+              statsJson.errors.forEach(function (e) {
+                grunt.log.writeln(e);
+              });
+              grunt.fail.warn(statsJson.errors.length + ' errors building ' + baseDir);
+              return;
             }
-
-            js += obj.js;
-
-            // Cleanup
-            js = js.replace(/\.coffee(\'|\")/g, '.js$1');
-
-            // Write the destination file.
-            grunt.file.write(f.dest, js);
-
-            // Print a success message.
-            grunt.log.writeln('File "' + f.dest + '" built.');
-
-            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
-
+            if (stats.hasWarnings()) {
+              console.log('WARN');
+              statsJson.warnings.forEach(function (w) {
+                grunt.log.writeln(w);
+              });
+            }
+            console.log(stats.toString({
+              colors: true
+            }));
             todo--;
             if (todo === 0) {
               done();
             }
           });
+
         });
+        /*
+             TODO: createDemos
+            if (!manifest.noflo || !manifest.noflo.graphs) {
+              return;
+            }
+            Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
+            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
+            */
       });
     });
   });
