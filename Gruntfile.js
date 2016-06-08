@@ -16,11 +16,11 @@ module.exports = function(grunt) {
       all: [
         'Gruntfile.js',
         'tasks/*.js',
-        '<%= nodeunit.tests %>',
+        'src/*.js'
       ],
       options: {
         jshintrc: '.jshintrc',
-      },
+      }
     },
 
     // Before generating any new files, remove any previously-created files.
@@ -55,11 +55,6 @@ module.exports = function(grunt) {
       }
     },
 
-    // Unit tests.
-    nodeunit: {
-      tests: ['test/*_test.js'],
-    },
-
     // End-to-End smoketests
     mocha_phantomjs: {
       options: {
@@ -79,7 +74,6 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-exec');
   grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-clean');
-  grunt.loadNpmTasks('grunt-contrib-nodeunit');
   grunt.loadNpmTasks('grunt-mocha-phantomjs');
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
