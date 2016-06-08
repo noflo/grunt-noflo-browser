@@ -49,8 +49,6 @@ module.exports = function(grunt) {
         discover: true,
         recursive: true
       },
-      // Runtime filtering options
-      runtimes: ['noflo', 'noflo-browser'],
       // Options for demo files
       graph_scripts: [],
       heads: [],
@@ -89,6 +87,14 @@ module.exports = function(grunt) {
           return resolve(entryPath);
         }).then(function (entryPath) {
           fileOptions.webpack.entry = entryPath;
+
+          fileOptions.runtimes = fileOptions.manifest.runtimes.slice(0);
+          if (fileOptions.webpack.target === 'node') {
+            fileOptions.runtimes.push('noflo-nodejs');
+          } else {
+            fileOptions.runtimes.push('noflo-browser');
+          }
+
           var discover = bluebird.promisify(buildLoader.discover);
           return discover(fileOptions);
         }).then(function (components) {
