@@ -2,7 +2,6 @@
 npm-debug.log
 /tmp/
 /tmp2/
-/test/fixtures/node_modules
-/test/fixtures/graphs/*.js
+/spec/fixtures/node_modules
 /spec/result.xml
 *~

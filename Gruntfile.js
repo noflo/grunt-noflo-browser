@@ -25,13 +25,13 @@ module.exports = function(grunt) {
 
     // Before generating any new files, remove any previously-created files.
     clean: {
-      tests: ['tmp', 'test/fixtures/node_modules/'],
+      tests: ['tmp', 'spec/fixtures/node_modules/'],
     },
 
     exec: {
       install_fixture_deps: {
         command: 'npm install',
-        cwd: 'test/fixtures/'
+        cwd: 'spec/fixtures/'
       }
     },
 
@@ -43,7 +43,7 @@ module.exports = function(grunt) {
           graph: 'bar/Clock'
         },
         files: {
-          'tmp/noflo.js': ['test/fixtures/component.json']
+          'tmp/noflo.js': ['spec/fixtures/component.json']
         }
       }
     },
@@ -51,7 +51,7 @@ module.exports = function(grunt) {
     noflo_optimized: {
       build: {
         files: {
-          'tmp2/noflo.js': ['test/fixtures/graphs/Clock.json']
+          'tmp2/noflo.js': ['spec/fixtures/graphs/Clock.json']
         }
       }
     },
