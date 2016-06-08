@@ -60,6 +60,16 @@ module.exports = function(grunt) {
       tests: ['test/*_test.js'],
     },
 
+    // End-to-End smoketests
+    mocha_phantomjs: {
+      options: {
+        output: 'spec/result.xml',
+        reporter: 'spec',
+        failWithOutput: true
+      },
+      all: ['spec/runner.html']
+    }
+
   });
 
   // Actually load this plugin's task(s).
@@ -70,10 +80,11 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-contrib-nodeunit');
+  grunt.loadNpmTasks('grunt-mocha-phantomjs');
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser']);
+  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'mocha_phantomjs']);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test']);
