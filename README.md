@@ -1,6 +1,6 @@
 # grunt-noflo-browser [![Build Status](https://travis-ci.org/noflo/grunt-noflo-browser.svg?branch=master)](https://travis-ci.org/noflo/grunt-noflo-browser) [![Build status](https://ci.appveyor.com/api/projects/status/ft5ybv2laqu5aeio)](https://ci.appveyor.com/project/bergie/grunt-noflo-browser)
 
-> Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them.
+> Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them. It uses [Webpack](https://webpack.github.io/) for building.
 
 ## Getting Started
 This plugin requires Grunt `~0.4.1`
@@ -74,25 +74,6 @@ grunt.initConfig({
         'dist/noflo.js': ['component.json'],
       },
     }
-  },
-});
-```
-
-## The `noflo_optimized` task
-This task creates an optimized build of NoFlo with no unused files present, which can provide a file size benefit of around 60-80% depending on your project dependencies. However, it is based on a new build setup made on top of [Browserify](http://browserify.org/) and therefore is not yet reliable enough for production yet.
-
-### Overview
-In your project's Gruntfile, add a section named `noflo_optimized` to the data object passed into `grunt.initConfig()`.
-
-```js
-grunt.initConfig({
-  noflo_optimized: {
-    options: {
-      // Task-specific options go here.
-    },
-    build: {
-      // Target-specific file lists and/or options go here.
-    },
   },
 });
 ```

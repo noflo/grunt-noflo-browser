@@ -48,14 +48,6 @@ module.exports = function(grunt) {
       }
     },
 
-    noflo_optimized: {
-      build: {
-        files: {
-          'tmp2/noflo.js': ['spec/fixtures/graphs/Clock.json']
-        }
-      }
-    },
-
     // End-to-End smoketests
     mocha_phantomjs: {
       options: {
