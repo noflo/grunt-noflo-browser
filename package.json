@@ -15,12 +15,7 @@
   "bugs": {
     "url": "https://github.com/noflo/grunt-noflo-browser/issues"
   },
-  "licenses": [
-    {
-      "type": "MIT",
-      "url": "https://github.com/noflo/grunt-noflo-browser/blob/master/LICENSE-MIT"
-    }
-  ],
+  "license": "MIT",
   "engines": {
     "node": ">= 0.8.0"
   },
@@ -43,7 +38,8 @@
     "grunt": ">=0.4.0"
   },
   "keywords": [
-    "gruntplugin"
+    "gruntplugin",
+    "noflo"
   ],
   "dependencies": {
     "component-builder": "0.10.x",
