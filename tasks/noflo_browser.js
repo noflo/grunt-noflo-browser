@@ -101,22 +101,13 @@ module.exports = function(grunt) {
             filename: path.basename(f.dest)
           };
           webpackConfig.context = baseDir;
-          /*
-          webpackConfig.resolve = {
-            root: [
-              path.resolve(process.cwd(), path.dirname(f.dest)),
-              baseDir,
-              path.resolve(baseDir, 'node_modules/')
-            ],
-            extensions: ["", ".coffee", ".js"]
-          };*/
           webpackConfig.entry = entryPath;
           if (webpackConfig.target !== 'node') {
             webpackConfig.node = {
-              fs: 'empty'
+              fs: 'empty',
+              tv4: 'empty'
             };
           }
-          console.log(webpackConfig);
 
           webpack(webpackConfig).run(function (err, stats) {
             grunt.file.delete(entryPath);
