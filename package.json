@@ -1,7 +1,7 @@
 {
   "name": "grunt-noflo-browser",
   "description": "Grunt plugin for building NoFlo projects for the browser",
-  "version": "1.0.0-alpha2",
+  "version": "1.0.0-alpha3",
   "homepage": "https://github.com/noflo/grunt-noflo-browser",
   "author": {
     "name": "Henri Bergius",
