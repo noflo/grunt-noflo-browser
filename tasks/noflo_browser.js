@@ -101,6 +101,10 @@ module.exports = function(grunt) {
           fileOptions.loaderPath = buildLoader.save(components, grunt, fileOptions);
 
           var config = webpack.configure(fileOptions);
+
+          grunt.log.debug('Generated webpack configuration:');
+          grunt.log.debug(JSON.stringify(config, null, 2));
+
           return bluebird.promisify(webpack.run)(config)
         }).then(function () {
           grunt.file.delete(fileOptions.loaderPath);
