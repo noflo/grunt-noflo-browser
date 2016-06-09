@@ -41,6 +41,8 @@ exports.configure = function (options) {
   };
 
   config.context = options.baseDir;
+  config.entry = path.relative(options.baseDir, config.entry);
+  config.entry = path.resolve(options.baseDir, config.entry);
 
   if (config.target !== 'node') {
     config.node = {
