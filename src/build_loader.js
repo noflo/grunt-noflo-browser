@@ -24,9 +24,14 @@ var filterDependencies = function(modules, options, callback) {
 };
 
 var serialize = function(modules, options) {
+  var loaders = [];
   var lines = [];
   var indent = '    ';
   modules.forEach(function (module) {
+    if (module.noflo && module.noflo.loader) {
+      var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
+      loaders.push(indent + "require('" + loaderPath + "')");
+    }
     if (!module.components) {
       return;
     }
@@ -36,7 +41,10 @@ var serialize = function(modules, options) {
       lines.push(indent + "'" + fullname + "': require('" + componentPath + "')");
     });
   });
-  var contents = "{\n" + (lines.join(',\n')) + "\n  };";
+  var contents = {
+    components: "{\n" + (lines.join(',\n')) + "\n  };",
+    loaders: "[\n" + (loaders.join(',\n')) + "\n  ];"
+  };
   return contents;
 };
 
@@ -54,12 +62,10 @@ exports.discover = function (options, callback) {
   return;
 };
 
-exports.save = function (components, grunt, options) {
+exports.save = function (requires, grunt, options) {
   var template = grunt.file.read(path.resolve(__dirname, '../templates/componentloader.js'));
   var customLoader = grunt.template.process(template, {
-    data: {
-      components: components
-    }
+    data: requires
   });
 
   var loaderPath = path.resolve(options.baseDir, options.destName + '.loader.js');
