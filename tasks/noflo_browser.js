@@ -8,171 +8,134 @@
 
 'use strict';
 
-var Installer = require('component-installer');
-var Builder = require('component-builder');
 var path = require('path');
+var webpack = require('../src/webpack');
+var createDemos = require('../src/create_demos');
+var buildLoader = require('../src/build_loader');
+var bluebird = require('bluebird');
+var clone = require('clone');
 
 module.exports = function(grunt) {
-
   grunt.registerMultiTask('noflo_browser', 'Grunt plugin for building NoFlo projects for the browser', function() {
     var options = this.options({
-      require: true,
+      // Provide a graph component name to scope the build only to include its dependencies
+      graph: null,
+      // Default options for WebPack
+      webpack: {
+        module: {
+          loaders: [
+            { test: /\.coffee$/, loader: "coffee-loader" },
+            { test: /\.json$/, loader: "json-loader" },
+            { test: /\.fbp$/, loader: "fbp-loader" }
+          ],
+        },
+        resolve: {
+          extensions: ["", ".coffee", ".js"],
+        },
+        entry: null,
+        target: 'web',
+        externals: {},
+        plugins: []
+      },
+      // Modules that should be completely ignored
+      ignores: [
+        /tv4/
+      ],
+      // Files that can be used as entry files
+      directEntries: ['.js', '.coffee'],
+      // Default options for fbp-manifest
+      manifest: {
+        runtimes: ['noflo'],
+        discover: true,
+        recursive: true
+      },
+      // Options for demo files
+      graph_scripts: [],
+      heads: [],
       development: false,
       debug: false,
       ide: 'https://app.flowhub.io',
-      signalserver: 'https://api.flowhub.io',
-      concurrency: 10,
-      plugins: [
-        'component-json',
-        'component-coffee',
-        'component-fbp'
-      ],
-      remotes: [],
-      graph_scripts: [],
-      heads: []
+      signalserver: 'https://api.flowhub.io'
     });
 
     // Force task to async mode
     var done = this.async();
-    var todo = 0;
-
-    var templateName = (options.debug) ? "graphDebug" : "graph";
-    var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
-    var writeGraphFiles = function (manifest, scripts, srcDir, destDir, destPath) {
-      if (!manifest.noflo || !manifest.noflo.graphs) {
-        return;
-      }
-      Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
-        if (path.extname(manifest.noflo.graphs[graphName]) !== '.json') {
-          return;
-        }
-        var graph = grunt.file.readJSON(path.resolve(srcDir, manifest.noflo.graphs[graphName]));
-        if (!graph.properties.environment || !graph.properties.environment.type || graph.properties.environment.type !== 'noflo-browser') {
-          return;
-        }
-
-        if (!graph.properties.environment.content) {
-          return;
-        }
-        var templated = grunt.template.process(graphFileTemplate, {
-          data: {
-            name: graphName,
-            scripts: scripts,
-            lib: manifest.name,
-            ideUrl: options.ide,
-            signalServer: options.signalserver,
-            noflo: destPath,
-            graphPath: manifest.name + '/' + manifest.noflo.graphs[graphName],
-            content: graph.properties.environment.content,
-            heads: options.heads
-          }
-        });
-        var demoFile = path.resolve(destDir, graphName + '.html');
-        grunt.file.write(demoFile, templated);
-        grunt.log.writeln('Demo file "' + demoFile + '" built');
-      });
-    };
 
     // Iterate over all specified file groups.
-    this.files.forEach(function(f) {
-      var src = f.src.filter(function(filepath) {
-        // Warn on and remove invalid source files (if nonull was set).
-        if (!grunt.file.exists(filepath)) {
-          grunt.log.warn('Source file "' + filepath + '" not found.');
-          return false;
-        } else {
-          return true;
-        }
-      }).forEach(function (manifestPath) {
-        todo++;
-        var manifestDir =  path.resolve(process.cwd(), path.dirname(manifestPath));
+    bluebird.map(this.files, function (f) {
+      var fileOptions = clone(options);
+      fileOptions.destName = path.basename(f.dest, path.extname(f.dest));
+      fileOptions.destDir = path.resolve(process.cwd(), path.dirname(f.dest));
 
-        var installer = new Installer(manifestDir);
-        installer.concurrency(options.concurrency);
-        installer.destination(path.resolve(manifestDir, 'components/'));
-
-        options.remotes.forEach(function (remote) {
-          installer.remote(remote);
-        });
-
-        if (options.development) {
-          installer.development();
-        }
-
-        installer.on('package', function (pkg) {
-          if (pkg.inFlight) {
-            return;
-          }
-          grunt.log.writeln('install ' + pkg.slug);
-
-          pkg.on('error', function (err){
-            if (err.fatal) {
-              grunt.fail.warn(err);
-              return;
-            }
-            grunt.log.error(err);
-          });
-
-          pkg.on('exists', function (dep){
-            grunt.verbose.writeln('exists ' + dep.slug);
-          });
-
-          pkg.on('end', function() {
-            grunt.log.writeln(pkg.name + ' complete');
-          });
-        });
-
-        installer.install(function (err) {
-          if (err) {
-            grunt.fail.warn(err);
-            return;
+      return bluebird.map(f.src, function (filepath) {
+        return new bluebird.Promise(function (resolve) {
+          if (grunt.file.isDir(filepath)) {
+            fileOptions.baseDir = path.resolve(process.cwd(), filepath);
+          } else {
+            fileOptions.baseDir = path.resolve(process.cwd(), path.dirname(filepath));
           }
 
-          var builder = new Builder(manifestDir); 
-          builder.copyAssetsTo(path.resolve(process.cwd(), path.dirname(f.dest)));
-
-          // Load plugins
-          options.plugins.forEach(function (plugin) {
-            builder.use(require(plugin));
-          });
-
-          if (options.development) {
-            builder.development();
-            builder.addSourceURLs();
+          // Check if the file can be used as an entry as-is
+          if (webpack.isDirectEntry(filepath, grunt, fileOptions)) {
+            fileOptions.generatedEntry = false;
+            return resolve(filepath);
           }
 
-          builder.build(function (err, obj) {
-            if (err) {
-              grunt.fail.warn(err);
-              return;
-            }
+          // No usable entry file found, create from template
+          fileOptions.generatedEntry = true;
+          var entryPath = path.resolve(fileOptions.baseDir, fileOptions.destName + '.entry.js');
+          grunt.log.debug('No valid entry file provided, generating from templates');
+          grunt.file.copy(path.resolve(__dirname, '../templates/entry.js'), entryPath);
+          return resolve(entryPath);
+        }).then(function (entryPath) {
+          fileOptions.webpack.entry = entryPath;
 
-            var js = '';
+          fileOptions.runtimes = fileOptions.manifest.runtimes.slice(0);
+          if (fileOptions.webpack.target === 'node') {
+            fileOptions.runtimes.push('noflo-nodejs');
+          } else {
+            fileOptions.runtimes.push('noflo-browser');
+          }
 
-            if (options.require) {
-              js += obj.require;
-            }
+          var discover = bluebird.promisify(buildLoader.discover);
+          return discover(fileOptions);
+        }).then(function (components) {
+          fileOptions.loaderPath = buildLoader.save(components, grunt, fileOptions);
 
-            js += obj.js;
+          var config = webpack.configure(fileOptions);
 
-            // Cleanup
-            js = js.replace(/\.coffee(\'|\")/g, '.js$1');
+          grunt.log.debug('Generated webpack configuration:');
+          grunt.log.debug(JSON.stringify(config, null, 2));
 
-            // Write the destination file.
-            grunt.file.write(f.dest, js);
-
-            // Print a success message.
-            grunt.log.writeln('File "' + f.dest + '" built.');
-
-            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
-
-            todo--;
-            if (todo === 0) {
-              done();
-            }
-          });
+          return bluebird.promisify(webpack.run)(config)
+        }).then(function () {
+          grunt.file.delete(fileOptions.loaderPath);
+          if (fileOptions.generatedEntry) {
+            grunt.file.delete(fileOptions.webpack.entry);
+          }
+          return bluebird.resolve(null);
         });
       });
+    })
+    .nodeify(function (err, res) {
+      if (err) {
+        grunt.fail.warn(err);
+        return;
+      }
+      done();
     });
+    return;
+    /*
+             TODO: createDemos
+            var templateName = (options.debug) ? "graphDebug" : "graph";
+            var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
+            if (!manifest.noflo || !manifest.noflo.graphs) {
+              return;
+            }
+            Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
+            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
+      });
+    });
+            */
   });
 };

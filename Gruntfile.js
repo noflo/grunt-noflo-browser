@@ -16,23 +16,22 @@ module.exports = function(grunt) {
       all: [
         'Gruntfile.js',
         'tasks/*.js',
-        '<%= nodeunit.tests %>',
+        'src/*.js'
       ],
       options: {
         jshintrc: '.jshintrc',
-      },
+      }
     },
 
     // Before generating any new files, remove any previously-created files.
     clean: {
-      tests: ['tmp', 'test/fixtures/components/*/'],
+      tests: ['tmp', 'spec/fixtures/node_modules/'],
     },
 
-    noflo_manifest: {
-      update: {
-        files: {
-          'test/fixtures/component.json': ['test/fixtures/components/*', 'test/fixtures/graphs/*.json', 'test/fixtures/graphs/*.fbp']
-        }
+    exec: {
+      install_fixture_deps: {
+        command: 'npm install',
+        cwd: 'spec/fixtures/'
       }
     },
 
@@ -40,26 +39,24 @@ module.exports = function(grunt) {
     noflo_browser: {
       build: {
         options: {
-          graph_scripts: ['foo.js']
+          graph_scripts: ['foo.js'],
+          graph: 'bar/Clock'
         },
         files: {
-          'tmp/noflo.js': ['test/fixtures/component.json']
+          'tmp/noflo.js': ['spec/fixtures/component.json']
         }
       }
     },
 
-    noflo_optimized: {
-      build: {
-        files: {
-          'tmp2/noflo.js': ['test/fixtures/graphs/Clock.json']
-        }
-      }
-    },
-
-    // Unit tests.
-    nodeunit: {
-      tests: ['test/*_test.js'],
-    },
+    // End-to-End smoketests
+    mocha_phantomjs: {
+      options: {
+        output: 'spec/result.xml',
+        reporter: 'spec',
+        failWithOutput: true
+      },
+      all: ['spec/runner.html']
+    }
 
   });
 
@@ -67,14 +64,14 @@ module.exports = function(grunt) {
   grunt.loadTasks('tasks');
 
   // These plugins provide necessary tasks.
-  grunt.loadNpmTasks('grunt-noflo-manifest');
+  grunt.loadNpmTasks('grunt-exec');
   grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-clean');
-  grunt.loadNpmTasks('grunt-contrib-nodeunit');
+  grunt.loadNpmTasks('grunt-mocha-phantomjs');
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'noflo_manifest', 'noflo_browser']);
+  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'mocha_phantomjs']);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test']);

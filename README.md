@@ -1,6 +1,8 @@
 # grunt-noflo-browser [![Build Status](https://travis-ci.org/noflo/grunt-noflo-browser.svg?branch=master)](https://travis-ci.org/noflo/grunt-noflo-browser) [![Build status](https://ci.appveyor.com/api/projects/status/ft5ybv2laqu5aeio)](https://ci.appveyor.com/project/bergie/grunt-noflo-browser)
 
-> Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them.
+> Grunt plugin for building NoFlo projects for the browser. It also extracts possible HTML contents from graphs and creates demo files for them. It uses [Webpack](https://webpack.github.io/) for building.
+
+grunt-noflo-browser can also be used for creating single-file executable bundles of Node.js projects. This can increase start-up time, especially in constrained environments.
 
 ## Getting Started
 This plugin requires Grunt `~0.4.1`
@@ -36,6 +38,28 @@ grunt.initConfig({
 ```
 
 ### Options
+
+#### options.graph
+Type: `String`
+Default value: `null`
+
+Setting this to the component name of a graph scopes the build to only include dependencies of that graph. If set to null, all available components will be included.
+
+#### options.webpack
+Type: `Object`
+
+[Webpack configuration options](http://webpack.github.io/docs/configuration.html) to use with the build.
+
+#### options.ignores
+Type: `Array`
+Default value: `[/tv4/]`
+
+List of regular expressions matching modules to ignore in the build. Can be used to remove optional dependencies.
+
+#### options.manifest
+Type: `Object`
+
+Custom options to pass to [fbp-manifest](https://github.com/flowbased/fbp-manifest) at component discovery stage.
 
 #### options.development
 Type: `Boolean`
@@ -78,24 +102,7 @@ grunt.initConfig({
 });
 ```
 
-## The `noflo_optimized` task
-This task creates an optimized build of NoFlo with no unused files present, which can provide a file size benefit of around 60-80% depending on your project dependencies. However, it is based on a new build setup made on top of [Browserify](http://browserify.org/) and therefore is not yet reliable enough for production yet.
-
-### Overview
-In your project's Gruntfile, add a section named `noflo_optimized` to the data object passed into `grunt.initConfig()`.
-
-```js
-grunt.initConfig({
-  noflo_optimized: {
-    options: {
-      // Task-specific options go here.
-    },
-    build: {
-      // Target-specific file lists and/or options go here.
-    },
-  },
-});
-```
+This generated file will provide a `window.require` function that can be used for loading NoFlo.
 
 ## Contributing
 In lieu of a formal styleguide, take care to maintain the existing coding style. Add unit tests for any new or changed functionality. Lint and test your code using [Grunt](http://gruntjs.com/).
