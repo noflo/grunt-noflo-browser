@@ -113,7 +113,7 @@ module.exports = function(grunt) {
           grunt.log.debug('Generated webpack configuration:');
           grunt.log.debug(JSON.stringify(config, null, 2));
 
-          return bluebird.promisify(webpack.run)(config)
+          return bluebird.promisify(webpack.run)(config);
         }).then(function () {
           grunt.file.delete(fileOptions.loaderPath);
           if (fileOptions.generatedEntry) {
