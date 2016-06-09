@@ -77,12 +77,14 @@ module.exports = function(grunt) {
 
           // Check if the file can be used as an entry as-is
           if (webpack.isDirectEntry(filepath, grunt, fileOptions)) {
-            fileOptions.directEntry = true;
+            fileOptions.generatedEntry = false;
             return resolve(filepath);
           }
 
           // No usable entry file found, create from template
+          fileOptions.generatedEntry = true;
           var entryPath = path.resolve(fileOptions.baseDir, fileOptions.destName + '.entry.js');
+          grunt.log.debug('No valid entry file provided, generating from templates');
           grunt.file.copy(path.resolve(__dirname, '../templates/entry.js'), entryPath);
           return resolve(entryPath);
         }).then(function (entryPath) {
@@ -108,7 +110,7 @@ module.exports = function(grunt) {
           return bluebird.promisify(webpack.run)(config)
         }).then(function () {
           grunt.file.delete(fileOptions.loaderPath);
-          if (!fileOptions.isDirectEntry) {
+          if (fileOptions.generatedEntry) {
             grunt.file.delete(fileOptions.webpack.entry);
           }
           return bluebird.resolve(null);
