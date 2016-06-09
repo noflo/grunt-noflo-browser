@@ -18,6 +18,8 @@ var clone = require('clone');
 module.exports = function(grunt) {
   grunt.registerMultiTask('noflo_browser', 'Grunt plugin for building NoFlo projects for the browser', function() {
     var options = this.options({
+      // baseDir to use for NoFlo component discover, if not same as the directory of the source file
+      baseDir: null,
       // Provide a graph component name to scope the build only to include its dependencies
       graph: null,
       // Default options for WebPack
@@ -69,10 +71,14 @@ module.exports = function(grunt) {
 
       return bluebird.map(f.src, function (filepath) {
         return new bluebird.Promise(function (resolve) {
-          if (grunt.file.isDir(filepath)) {
-            fileOptions.baseDir = path.resolve(process.cwd(), filepath);
+          if (fileOptions.baseDir) {
+            fileOptions.baseDir = path.resolve(process.cwd(), fileOptions.baseDir);
           } else {
-            fileOptions.baseDir = path.resolve(process.cwd(), path.dirname(filepath));
+            if (grunt.file.isDir(filepath)) {
+              fileOptions.baseDir = path.resolve(process.cwd(), filepath);
+            } else {
+              fileOptions.baseDir = path.resolve(process.cwd(), path.dirname(filepath));
+            }
           }
 
           // Check if the file can be used as an entry as-is
