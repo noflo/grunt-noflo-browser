@@ -30,7 +30,7 @@ var serialize = function(modules, options) {
   modules.forEach(function (module) {
     if (module.noflo && module.noflo.loader) {
       var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
-      loaders.push(indent + "require('" + loaderPath + "')");
+      loaders.push(indent + "require(" + JSON.stringify(loaderPath) + ")");
     }
     if (!module.components) {
       return;
@@ -38,7 +38,7 @@ var serialize = function(modules, options) {
     module.components.forEach(function (component) {
       var fullname = module.name ? module.name + "/" + component.name : component.name;
       var componentPath = path.resolve(options.baseDir, component.path);
-      lines.push(indent + "'" + fullname + "': require('" + componentPath + "')");
+      lines.push(indent + "'" + fullname + "': require(" + JSON.stringify(componentPath) + ")");
     });
   });
   var contents = {
