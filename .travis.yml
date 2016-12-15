@@ -6,9 +6,9 @@ before_script:
 script: grunt test
 deploy:
   provider: npm
-  email: jononor@gmail.com
+  email: henri.bergius@iki.fi
+  api_key:
+    secure: hK/pYShzH17XcfbHeIg2McqAEPKpVbiklYjD5EuJUe9MTAnBAPC2VmZwjMTziqJiOcLGn3eFqHP4nPXXi9vo54bVB2SHvJZ/OWaDWS70k+cx69cu8B2+87BMKonOcGOdmi9awvt9GaOBMm4cWVOIeiQicVqhmFIc233l8fTG86c=
   on:
     tags: true
     repo: noflo/grunt-noflo-browser
-  api_key:
-    secure: dCn0Pestiqm0v8BZkxfywfC4hhlRU2TU0GkyX7XmBEwBnwijeg5cEi3qvDIolfkQB3rfvT8RM+MfQE3G4cZP76a3FLCLk+Tox+YlwzN+5Pcxi0raDuQ2BToDGQQ3fE6CH9ZZXB+vJhOm7UL6ufCTfZ4UHNd1Ngt0bm0Md961OMc=
