@@ -44,7 +44,7 @@ exports.configure = function (options) {
   config.entry = path.relative(options.baseDir, config.entry);
   config.entry = path.resolve(options.baseDir, config.entry);
 
-  if (config.target !== 'node') {
+  if (config.target !== 'node' && !config.node) {
     config.node = {
       fs: 'empty'
     };
