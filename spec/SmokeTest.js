@@ -37,5 +37,31 @@ describe('A browser-built module', function () {
       ins.send('Hello NoFlo');
       ins.disconnect();
     });
+    it('should be able to read sources for elementary component', function (done) {
+      var loader = new noflo.ComponentLoader('');
+      loader.getSource('core/Repeat', function (err, c) {
+        if (err) {
+          return done(err);
+        }
+        chai.expect(c.library).to.equal('core');
+        chai.expect(c.name).to.equal('Repeat');
+        chai.expect(c.language).to.equal('javascript');
+        chai.expect(c.code).to.contain('noflo.Component');
+        done();
+      });
+    });
+    it('should be able to read sources for graph component', function (done) {
+      var loader = new noflo.ComponentLoader('');
+      loader.getSource('bar/Clock', function (err, c) {
+        if (err) {
+          return done(err);
+        }
+        chai.expect(c.library).to.equal('core');
+        chai.expect(c.name).to.equal('Repeat');
+        chai.expect(c.language).to.equal('javascript');
+        chai.expect(c.code).to.contain('noflo.Component');
+        done();
+      });
+    });
   });
 });
