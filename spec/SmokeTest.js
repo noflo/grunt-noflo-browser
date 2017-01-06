@@ -56,10 +56,10 @@ describe('A browser-built module', function () {
         if (err) {
           return done(err);
         }
-        chai.expect(c.library).to.equal('core');
-        chai.expect(c.name).to.equal('Repeat');
-        chai.expect(c.language).to.equal('javascript');
-        chai.expect(c.code).to.contain('noflo.Component');
+        chai.expect(c.library).to.equal('bar');
+        chai.expect(c.name).to.equal('Clock');
+        chai.expect(c.language).to.equal('json');
+        chai.expect(c.code).not.to.be.empty;
         done();
       });
     });
