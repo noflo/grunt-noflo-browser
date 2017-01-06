@@ -71,7 +71,7 @@ Whether to build also the development dependencies.
 Type: `Boolean`
 Default value: `false`
 
-Whether to enable debugging using Flowhub over WebRTC.
+Whether to enable debugging using Flowhub over WebRTC. Requires `noflo-runtime-webrtc` module to be installed.
 
 ### options.ide
 Type: `String`
