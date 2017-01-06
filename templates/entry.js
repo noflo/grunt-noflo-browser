@@ -1,5 +1,5 @@
 var exported = {
-  noflo: require('noflo')
+  <%= exposedModules %>
 };
 
 if (window) {

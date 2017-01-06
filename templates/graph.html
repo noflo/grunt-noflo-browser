@@ -10,11 +10,18 @@
     <%= content %>
     <script>
       var noflo = require('noflo');
-      noflo.graph.loadJSON(require('<%= graphPath %>'), function (graph) {
-        graph.baseDir = '/<%= lib %>';
-        noflo.createNetwork(graph, function (network) {
+      var loader = new noflo.ComponentLoader('<%= lib %>');
+      loader.load('<%= graphPath %>', function (err, instance) {
+        if (err) {
+          throw err;
+        }
+        instance.network.on('start', function () {
           console.log('<%= name %> is running!');
         });
+        instance.network.on('end', function () {
+          console.log('<%= name %> has finished');
+        });
+        instance.start();
       });
     </script>
   </body>

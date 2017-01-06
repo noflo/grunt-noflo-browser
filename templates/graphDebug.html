@@ -4,14 +4,26 @@
     <meta charset="utf-8">
     <title><%= name %></title><% _.forEach(scripts, function (path) { %>
     <script src="<%= path %>"></script><% }); %>
-    <script src="https://cdn.rawgit.com/rtc-io/rtc/v3.1.1/dist/rtc.js"></script>
+    <script src="https://app.flowhub.io/node_modules/rtc/dist/rtc.js"></script>
     <script src="<%= noflo %>"></script>
     <style>
     #flowhub_debug_url.nodebug {
       display: none;
     }
     #flowhub_debug_url.debug {
-      display: inherit;
+      display: block;
+      position: fixed;
+      z-index: 999;
+      right: 36px;
+      top: 36px;
+      background-color: hsla(210, 98%, 46%, .8) !important;
+      border-color: hsl(210, 98%, 46%) !important;
+      color: white !important;
+      text-decoration: none;
+      padding: 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: sans-serif;
     }
     </style>
     <% _.forEach(heads, function (headContent) { %>
@@ -31,21 +43,30 @@
         return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
       }
 
-      noflo.graph.loadJSON(require('<%= graphPath %>'), function (err, graph) {
-        if (arguments.length == 1) {
-          graph = err; // compat with NoFlo 0.5.x
+      var noflo = require('noflo');
+      var loader = new noflo.ComponentLoader('<%= lib %>');
+      loader.load('<%= graphPath %>', function (err, instance) {
+        if (err) {
+          throw err;
         }
-        graph.baseDir = '/<%= lib %>';
+        var graph = instance.network.graph;
 
         var queryProtocol = getParameterByName('fbp_protocol');
         var queryAddress = getParameterByName('fbp_address');
         var queryNoLoad = getParameterByName('fbp_noload');
 
         var runtimeOptions = {
-            baseDir: graph.baseDir
+          baseDir: '<%= lib %>',
+          defaultPermissions: [
+            'protocol:graph',
+            'protocol:component',
+            'protocol:network',
+            'protocol:runtime',
+            'component:getsource'
+          ]
         };
         if (queryNoLoad.toLowerCase() !== 'true') {
-            runtimeOptions.defaultGraph = graph;
+          runtimeOptions.defaultGraph = graph;
         };
         if (!queryProtocol) {
             queryProtocol = 'webrtc';
