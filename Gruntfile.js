@@ -47,6 +47,17 @@ module.exports = function(grunt) {
         }
       }
     },
+    // Configuration for the test runner in fixtures
+    noflo_browser_mocha: {
+      all: {
+        options: {
+          scripts: ["../tmp/noflo.js"]
+        },
+        files: {
+          'spec/runner.html': ['spec/*.js']
+        }
+      }
+    },
 
     // End-to-End smoketests
     mocha_phantomjs: {
@@ -71,7 +82,7 @@ module.exports = function(grunt) {
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'mocha_phantomjs']);
+  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'noflo_browser_mocha', 'mocha_phantomjs']);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test']);

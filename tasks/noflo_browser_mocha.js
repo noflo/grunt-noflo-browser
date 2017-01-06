@@ -19,10 +19,16 @@ var generateRunner = function(grunt, destination, testfiles, options, callback) 
     testfiles.forEach(function(f) {
         // URLs should be relative to dir of opened page
         var relative = path.relative(destDir, f);
-        console.log(f, relative);
         files.push(relative);
     });
-    console.log(files);
+
+    if (!files.length) {
+      grunt.fail.warn(new Error('No test files found'));
+      return;
+    }
+
+    grunt.log.debug('Generated test file containing');
+    grunt.log.debug('- ' + files.join('\n- '));
     var templated = grunt.template.process(runnerFileTemplate, {
       data: {
         title: options.title,
@@ -48,8 +54,9 @@ module.exports = function(grunt) {
 
     // Force task to async mode
     var done = this.async();
+
     this.files.forEach(function(fileInfo) {
-        generateRunner(grunt, fileInfo.dest, fileInfo.src, options, done);
+      generateRunner(grunt, fileInfo.dest, fileInfo.src, options, done);
     });
   });
 };
