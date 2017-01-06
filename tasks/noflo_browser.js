@@ -53,7 +53,9 @@ module.exports = function(grunt) {
       },
       // Options for demo files
       graph_scripts: [],
-      exposed_modules: ['noflo'],
+      exposed_modules: {
+        noflo: 'noflo'
+      },
       heads: [],
       development: false,
       debug: false,
@@ -61,8 +63,8 @@ module.exports = function(grunt) {
       signalserver: 'https://api.flowhub.io'
     });
 
-    if (options.debug) {
-      options.exposed_modules.push('noflo-runtime-webrtc');
+    if (options.debug && !options.exposed_modules['noflo-runtime-webrtc']) {
+      options.exposed_modules['noflo-runtime-webrtc'] = 'noflo-runtime-webrtc';
     }
 
     // Force task to async mode
@@ -96,8 +98,10 @@ module.exports = function(grunt) {
           fileOptions.generatedEntry = true;
           var entryPath = path.resolve(fileOptions.baseDir, fileOptions.destName + '.entry.js');
           grunt.log.debug('No valid entry file provided, generating from templates');
-          var exposedModules = fileOptions.exposed_modules.map(function (m) {
-            return '\'' + m + '\': require(\'' + m + '\')';
+          var exposedModules = Object.keys(fileOptions.exposed_modules).map(function (m) {
+            var reqPath = fileOptions.exposed_modules[m];
+            grunt.log.debug('Exposing module ' + m + ' with require("' + reqPath + '")');
+            return '\'' + m + '\': require(\'' + reqPath + '\')';
           }).join(",\n");
           var entryTemplate = grunt.file.read(path.resolve(__dirname, '../templates/entry.js'));
           var templatedEntry = grunt.template.process(entryTemplate, {
