@@ -53,12 +53,17 @@ module.exports = function(grunt) {
       },
       // Options for demo files
       graph_scripts: [],
+      exposed_modules: ['noflo'],
       heads: [],
       development: false,
       debug: false,
       ide: 'https://app.flowhub.io',
       signalserver: 'https://api.flowhub.io'
     });
+
+    if (options.debug) {
+      options.exposed_modules.push('noflo-runtime-webrtc');
+    }
 
     // Force task to async mode
     var done = this.async();
@@ -91,7 +96,16 @@ module.exports = function(grunt) {
           fileOptions.generatedEntry = true;
           var entryPath = path.resolve(fileOptions.baseDir, fileOptions.destName + '.entry.js');
           grunt.log.debug('No valid entry file provided, generating from templates');
-          grunt.file.copy(path.resolve(__dirname, '../templates/entry.js'), entryPath);
+          var exposedModules = fileOptions.exposed_modules.map(function (m) {
+            return '\'' + m + '\': require(\'' + m + '\')';
+          }).join(",\n");
+          var entryTemplate = grunt.file.read(path.resolve(__dirname, '../templates/entry.js'));
+          var templatedEntry = grunt.template.process(entryTemplate, {
+            data: {
+              exposedModules: exposedModules
+            }
+          });
+          grunt.file.write(entryPath, templatedEntry);
           return resolve(entryPath);
         }).then(function (entryPath) {
           fileOptions.webpack.entry = entryPath;
@@ -120,6 +134,13 @@ module.exports = function(grunt) {
             grunt.file.delete(fileOptions.webpack.entry);
           }
           return bluebird.resolve(null);
+        }).then(function () {
+          if (fileOptions.webpack.target === 'node') {
+            // No need to build HTML demos for Node.js
+            return bluebird.resolve(null);
+          }
+          var buildDemos = bluebird.promisify(createDemos);
+          return buildDemos(fileOptions, grunt);
         });
       });
     })
@@ -131,17 +152,5 @@ module.exports = function(grunt) {
       done();
     });
     return;
-    /*
-             TODO: createDemos
-            var templateName = (options.debug) ? "graphDebug" : "graph";
-            var graphFileTemplate = grunt.file.read(path.resolve(__dirname, '../templates/'+templateName+'.html'));
-            if (!manifest.noflo || !manifest.noflo.graphs) {
-              return;
-            }
-            Object.keys(manifest.noflo.graphs).forEach(function (graphName) {
-            writeGraphFiles(grunt.file.readJSON(manifestPath), options.graph_scripts, manifestDir, path.resolve(process.cwd(), path.dirname(f.dest)), path.basename(f.dest));
-      });
-    });
-            */
   });
 };
