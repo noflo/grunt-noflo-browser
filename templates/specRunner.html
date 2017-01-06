@@ -16,19 +16,19 @@
     <% _.forEach(scripts, function (path) { %>
     <script src="<%= path %>"></script>
     <% }); %>
-    <script src="http://chaijs.com/chai.js"></script>
+    <script src="../node_modules/chai/chai.js"></script>
     <script src="../node_modules/mocha/mocha.js"></script>
-    <script>mocha.setup('bdd');</script>
+    <script>
+      if (window.initMochaPhantomJS) {
+        window.initMochaPhantomJS();
+      }
+      mocha.setup('bdd');
+    </script>
     <% _.forEach(testfiles, function (path) { %>
     <script src="<%= path %>"></script>
     <% }); %>
     <script>
-      if (window.mochaPhantomJS) {
-        mochaPhantomJS.run();
-      } else {
-        mocha.checkLeaks();
-        mocha.run();
-      }
+      mocha.run();
     </script>
   </body>
 </html>
