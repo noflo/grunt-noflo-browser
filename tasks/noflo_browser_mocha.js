@@ -33,7 +33,8 @@ var generateRunner = function(grunt, destination, testfiles, options, callback) 
       data: {
         title: options.title,
         scripts: options.scripts,
-        testfiles: files
+        testfiles: files,
+        fixtures: options.fixtures
       }
     });
     var runnerFile = path.resolve(destination);
@@ -49,7 +50,8 @@ module.exports = function(grunt) {
   function() {
     var options = this.options({
       title: 'Tests',
-      scripts: []
+      scripts: [],
+      fixtures: ''
     });
 
     // Force task to async mode

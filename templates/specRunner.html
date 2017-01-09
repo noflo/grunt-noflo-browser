@@ -12,7 +12,7 @@
   </head>
   <body>
     <div id="mocha"></div>
-    <div id="fixtures"></div>
+    <div id="fixtures"><%= fixtures %></div>
     <% _.forEach(scripts, function (path) { %>
     <script src="<%= path %>"></script>
     <% }); %>
