@@ -49,59 +49,61 @@
         if (err) {
           throw err;
         }
-        var graph = instance.network.graph;
+        instance.on('ready', function () {
+          var graph = instance.network.graph;
 
-        var queryProtocol = getParameterByName('fbp_protocol');
-        var queryAddress = getParameterByName('fbp_address');
-        var queryNoLoad = getParameterByName('fbp_noload');
+          var queryProtocol = getParameterByName('fbp_protocol');
+          var queryAddress = getParameterByName('fbp_address');
+          var queryNoLoad = getParameterByName('fbp_noload');
 
-        var runtimeOptions = {
-          baseDir: '<%= lib %>',
-          defaultPermissions: [
-            'protocol:graph',
-            'protocol:component',
-            'protocol:network',
-            'protocol:runtime',
-            'component:getsource'
-          ]
-        };
-        if (queryNoLoad.toLowerCase() !== 'true') {
-          runtimeOptions.defaultGraph = graph;
-        };
-        if (!queryProtocol) {
-            queryProtocol = 'webrtc';
-        }
-
-        var rt = null;
-        if (queryProtocol == 'webrtc') {
-          var webrtcRuntime = require('noflo-runtime-webrtc');
-          if (queryAddress) {
-            // ID to use specified from outside, normally by Flowhub IDE
-            rt = webrtcRuntime(queryAddress, runtimeOptions, true);
-          } else {
-            // Generate new ID
-            rt = webrtcRuntime(null, runtimeOptions, true);
-            rt.signaller = '<%= signalServer %>';
+          var runtimeOptions = {
+            baseDir: '<%= lib %>',
+            defaultPermissions: [
+              'protocol:graph',
+              'protocol:component',
+              'protocol:network',
+              'protocol:runtime',
+              'component:getsource'
+            ]
+          };
+          if (queryNoLoad.toLowerCase() !== 'true') {
+            runtimeOptions.defaultGraph = graph;
+          };
+          if (!queryProtocol) {
+              queryProtocol = 'webrtc';
           }
-          var ide = '<%= ideUrl %>';
-          var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.signaller+'#'+rt.id);
-          var debugButton = document.getElementById('flowhub_debug_url');
-          console.log('Debug URL', debugUrl);
-          debugButton.className = "debug";
-          debugButton.href = debugUrl;
-        } else if (queryProtocol == 'iframe') {
-          var iframeRuntime = require('noflo-runtime-iframe');
-          rt = iframeRuntime(runtimeOptions);
-        }
 
-        if (rt) {
-          rt.network.on('addnetwork', function () {
-            console.log('<%= name %> is running!');
-          });
-          rt.start();
-        } else {
-          console.log('Warning: unable to create FBP runtime');
-        }
+          var rt = null;
+          if (queryProtocol == 'webrtc') {
+            var webrtcRuntime = require('noflo-runtime-webrtc');
+            if (queryAddress) {
+              // ID to use specified from outside, normally by Flowhub IDE
+              rt = webrtcRuntime(queryAddress, runtimeOptions, true);
+            } else {
+              // Generate new ID
+              rt = webrtcRuntime(null, runtimeOptions, true);
+              rt.signaller = '<%= signalServer %>';
+            }
+            var ide = '<%= ideUrl %>';
+            var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=webrtc&address='+rt.signaller+'#'+rt.id);
+            var debugButton = document.getElementById('flowhub_debug_url');
+            console.log('Debug URL', debugUrl);
+            debugButton.className = "debug";
+            debugButton.href = debugUrl;
+          } else if (queryProtocol == 'iframe') {
+            var iframeRuntime = require('noflo-runtime-iframe');
+            rt = iframeRuntime(runtimeOptions);
+          }
+
+          if (rt) {
+            rt.network.on('addnetwork', function () {
+              console.log('<%= name %> is running!');
+            });
+            rt.start();
+          } else {
+            console.log('Warning: unable to create FBP runtime');
+          }
+        });
       });
     </script>
   </body>

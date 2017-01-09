@@ -66,6 +66,9 @@ module.exports = function(grunt) {
     if (options.debug && !options.exposed_modules['noflo-runtime-webrtc']) {
       options.exposed_modules['noflo-runtime-webrtc'] = 'noflo-runtime-webrtc';
     }
+    if (options.debug && !options.exposed_modules['noflo-runtime-iframe']) {
+      options.exposed_modules['noflo-runtime-iframe'] = 'noflo-runtime-iframe';
+    }
 
     // Force task to async mode
     var done = this.async();
