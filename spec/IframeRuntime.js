@@ -1,6 +1,7 @@
 describe('IFRAME runtime', function () {
   var iframe = null;
   var origin = null;
+  var listener = null;
   send = function(protocol, command, payload) {
     var msg = {
       protocol: protocol,
@@ -21,7 +22,9 @@ describe('IFRAME runtime', function () {
     iframeElement.src = '../tmp/Clock.html?fbp_noload=true&fbp_protocol=iframe';
     iframeElement.onload = function () {
       iframe = iframeElement.contentWindow;
-      done();
+      setTimeout(function () {
+        done();
+      }, 100);
     };
     origin = window.location.origin;
     fixtureContainer.appendChild(iframeElement);
@@ -29,8 +32,10 @@ describe('IFRAME runtime', function () {
   describe('Runtime Protocol', function() {
     describe('requesting runtime metadata', function() {
       it('should provide it back', function(done) {
-        var listener = function(message) {
+        this.timeout(4000);
+        listener = function(message) {
           window.removeEventListener('message', listener, false);
+          listener = null;
           msg = JSON.parse(message.data);
           chai.expect(msg.protocol).to.equal('runtime');
           chai.expect(msg.command).to.equal('runtime');
@@ -43,10 +48,16 @@ describe('IFRAME runtime', function () {
         return send('runtime', 'getruntime', '');
       });
     });
+  });
+  describe('Component Protocol', function() {
     describe('requesting component listing', function() {
       it('should provide it back', function(done) {
+        this.timeout(4000);
         var received = 0;
-        var listener = function(message) {
+        if (listener) {
+          return done(new Error('Previous test still listening, abort'));
+        }
+        listener = function(message) {
           var msg = JSON.parse(message.data);
           if (msg.protocol !== 'component') {
             return;
@@ -59,6 +70,7 @@ describe('IFRAME runtime', function () {
             chai.expect(msg.payload).to.equal(received);
             chai.expect(received).to.be.above(5);
             window.removeEventListener('message', listener, false);
+            listener = null;
             done();
           }
           return;
