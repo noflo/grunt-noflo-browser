@@ -39,7 +39,8 @@ module.exports = function(grunt) {
     noflo_browser: {
       build: {
         options: {
-          graph: 'bar/Clock'
+          graph: 'bar/Clock',
+          debug: true
         },
         files: {
           'tmp/noflo.js': ['spec/fixtures/component.json']
