@@ -116,6 +116,18 @@ describe('A browser-built module', function () {
           ins.disconnect();
         });
       });
+      it('should be able to read sources for the registered component', function (done) {
+        loader.getSource('bar/AddOne', function (err, c) {
+          if (err) {
+            return done(err);
+          }
+          chai.expect(c.library).to.equal('bar');
+          chai.expect(c.name).to.equal('AddOne');
+          chai.expect(c.language).to.equal('javascript');
+          chai.expect(c.code).to.contain('noflo.Component');
+          done();
+        });
+      });
     });
   });
 });
