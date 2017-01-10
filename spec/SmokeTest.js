@@ -67,11 +67,30 @@ describe('A browser-built module', function () {
     });
     describe('setSource', function () {
       var loader = null;
+      var source = null;
       before(function () {
         loader = new noflo.ComponentLoader('');
+        source = "var noflo = require('noflo');\n" +
+         "exports.getComponent = function () {\n" +
+         "  var c = new noflo.Component({\n" +
+         "    inPorts: {\n" +
+         "      'in': {\n" +
+         "        datatype: 'integer'\n" +
+         "      }\n" +
+         "    },\n" +
+         "     outPorts: {\n" +
+         "       out: {\n" +
+         "         datatype: 'integer'\n" +
+         "       }\n" +
+         "     }\n" +
+         "  });\n" +
+         "  return c.process(function (input, output) {\n" +
+         "    output.sendDone(input.getData() + 1);\n" +
+         "  });\n" +
+         "}"
       });
       it('should be able to write sources for elementary component', function (done) {
-        loader.setSource('bar', 'AddOne', "var noflo = require('noflo');\nexports.getComponent = function () {\nvar c = new noflo.Component({inPorts: { 'in': { datatype: 'integer' }}, outPorts: { out: { datatype: 'integer' }}});\nreturn c.process(function (input, output) { output.sendDone(input.getData() + 1); });\n}", 'javascript', function (err) {
+        loader.setSource('bar', 'AddOne', source, 'javascript', function (err) {
           if (err) {
             return done(err);
           }
