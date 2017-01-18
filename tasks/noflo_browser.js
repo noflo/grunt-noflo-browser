@@ -27,7 +27,6 @@ module.exports = function(grunt) {
         module: {
           loaders: [
             { test: /\.coffee$/, loader: "coffee-loader" },
-            { test: /\.json$/, loader: "json-loader" },
             { test: /\.fbp$/, loader: "fbp-loader" }
           ],
         },
