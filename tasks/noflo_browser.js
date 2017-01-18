@@ -31,7 +31,7 @@ module.exports = function(grunt) {
           ],
         },
         resolve: {
-          extensions: ["", ".coffee", ".js"],
+          extensions: [".coffee", ".js"],
         },
         entry: null,
         target: 'web',
