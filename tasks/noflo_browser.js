@@ -25,14 +25,23 @@ module.exports = function(grunt) {
       // Default options for WebPack
       webpack: {
         module: {
-          loaders: [
-            { test: /\.coffee$/, loader: "coffee-loader" },
-            { test: /\.json$/, loader: "json-loader" },
-            { test: /\.fbp$/, loader: "fbp-loader" }
+          rules: [
+            {
+              test: /\.coffee$/,
+              use: [
+                "coffee-loader"
+              ]
+            },
+            {
+              test: /\.fbp$/,
+              use: [
+                "fbp-loader"
+              ]
+            }
           ],
         },
         resolve: {
-          extensions: ["", ".coffee", ".js"],
+          extensions: [".coffee", ".js"],
         },
         entry: null,
         target: 'web',
