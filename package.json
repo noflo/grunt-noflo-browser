@@ -1,7 +1,7 @@
 {
   "name": "grunt-noflo-browser",
   "description": "Grunt plugin for building NoFlo projects for the browser",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "homepage": "https://github.com/noflo/grunt-noflo-browser",
   "author": {
     "name": "Henri Bergius",
@@ -24,12 +24,12 @@
   },
   "dependencies": {
     "bluebird": "^3.4.0",
-    "clone": "^1.0.2",
+    "clone": "^2.1.0",
     "coffee-loader": "^0.7.2",
     "coffee-script": "^1.10.0",
     "fbp-loader": "^0.1.1",
-    "fbp-manifest": "^0.1.9",
-    "webpack": "^2.2.0"
+    "fbp-manifest": "^0.1.13",
+    "webpack": "^2.2.1"
   },
   "devDependencies": {
     "chai": "^3.5.0",
