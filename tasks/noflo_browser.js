@@ -25,9 +25,19 @@ module.exports = function(grunt) {
       // Default options for WebPack
       webpack: {
         module: {
-          loaders: [
-            { test: /\.coffee$/, loader: "coffee-loader" },
-            { test: /\.fbp$/, loader: "fbp-loader" }
+          rules: [
+            {
+              test: /\.coffee$/,
+              use: [
+                "coffee-loader"
+              ]
+            },
+            {
+              test: /\.fbp$/,
+              use: [
+                "fbp-loader"
+              ]
+            }
           ],
         },
         resolve: {
