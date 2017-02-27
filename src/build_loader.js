@@ -55,6 +55,9 @@ exports.discover = function (options, callback) {
       return callback(err);
     }
     filterDependencies(manifest.modules, options, function(err, modules) {
+      if (err) {
+        return callback(err);
+      }
       var contents = serialize(modules, options);
       callback(err, contents);
     });
