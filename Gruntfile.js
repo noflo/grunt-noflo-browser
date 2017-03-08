@@ -43,7 +43,7 @@ module.exports = function(grunt) {
           debug: true
         },
         files: {
-          'tmp/noflo.js': ['spec/fixtures/component.json']
+          'tmp/noflo.js': ['spec/fixtures/package.json']
         }
       }
     },

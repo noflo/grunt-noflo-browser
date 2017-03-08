@@ -13,16 +13,16 @@
     "node": ">= 0.8.0"
   },
   "dependencies": {
-    "noflo": "0.x >= 0.7",
+    "noflo": "0.x >= 0.8",
     "noflo-math": "^0.0.8",
     "noflo-core": "^0.2.3",
     "noflo-objects": "^0.1.14",
     "noflo-dom": "^0.1.1",
-    "noflo-css": "^0.0.1"
+    "noflo-css": "^0.0.2"
   },
   "devDependencies": {
-    "noflo-runtime-iframe": "^0.7.3",
-    "noflo-runtime-webrtc": "^0.7.3"
+    "noflo-runtime-iframe": "^0.8.0",
+    "noflo-runtime-webrtc": "^0.8.0"
   },
   "keywords": [
     "noflo"
