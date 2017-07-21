@@ -5,7 +5,7 @@
 grunt-noflo-browser can also be used for creating single-file executable bundles of Node.js projects. This can increase start-up time, especially in constrained environments.
 
 ## Getting Started
-This plugin requires Grunt `~0.4.1`
+This plugin requires Grunt `1.x`
 
 If you haven't used [Grunt](http://gruntjs.com/) before, be sure to check out the [Getting Started](http://gruntjs.com/getting-started) guide, as it explains how to create a [Gruntfile](http://gruntjs.com/sample-gruntfile) as well as install and use Grunt plugins. Once you're familiar with that process, you may install this plugin with this command:
 
@@ -88,14 +88,15 @@ Which WebRTC signalling server to use for debugging.
 ### Usage Examples
 
 #### A typical browser build
-In this example we'll parse the `component.json` file, download the dependencies, and create the built file to the `dist` folder.
+In this example we'll parse the `package.json` file, download the dependencies, and create the built file to the `dist` folder.
 
 ```js
 grunt.initConfig({
   noflo_browser: {
-    build:
+    options: {},
+    build: {
       files: {
-        'dist/noflo.js': ['component.json'],
+        'dist/noflo.js': ['package.json'],
       },
     }
   },
