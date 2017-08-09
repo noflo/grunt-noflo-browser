@@ -72,11 +72,8 @@ module.exports = function(grunt) {
       signalserver: 'https://api.flowhub.io'
     });
 
-    if (options.debug && !options.exposed_modules['noflo-runtime-webrtc']) {
-      options.exposed_modules['noflo-runtime-webrtc'] = 'noflo-runtime-webrtc';
-    }
-    if (options.debug && !options.exposed_modules['noflo-runtime-iframe']) {
-      options.exposed_modules['noflo-runtime-iframe'] = 'noflo-runtime-iframe';
+    if (options.debug && !options.exposed_modules['noflo-runtime-postmessage']) {
+      options.exposed_modules['noflo-runtime-postmessage'] = 'noflo-runtime-postmessage';
     }
 
     // Force task to async mode
