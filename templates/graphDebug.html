@@ -78,7 +78,6 @@
             var ide = '<%= ideUrl %>';
             var debugUrl = ide+'#runtime/endpoint?'+encodeURIComponent('protocol=opener&address='+window.location.href);
             var debugButton = document.getElementById('flowhub_debug_url');
-            console.log('Debug URL', debugUrl);
             debugButton.className = "debug";
             debugButton.href = debugUrl;
             rt = postMessageRuntime.opener(runtimeOptions, debugButton);
