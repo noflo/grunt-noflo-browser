@@ -21,8 +21,7 @@
     "noflo-css": "^0.0.2"
   },
   "devDependencies": {
-    "noflo-runtime-iframe": "^0.8.0",
-    "noflo-runtime-webrtc": "^0.8.0"
+    "noflo-runtime-postmessage": "^0.8.0"
   },
   "keywords": [
     "noflo"

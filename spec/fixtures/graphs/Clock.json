@@ -1,7 +1,7 @@
 {
   "properties": {
     "environment": {
-      "runtime": "noflo-browser",
+      "type": "noflo-browser",
       "content": "<div class='area' title='.area'>\n  <img id='clock' src='https://i.imgur.com/0S7R8OU.png' style='position:absolute; width:300px; height:300px; top:0; left:0;' />\n  <img id='hours' src='https://i.imgur.com/Fw8L3L1.png' style='position:absolute; top:50px; left:130px; height:200px;' />\n  <img id='minutes' src='https://i.imgur.com/WtSz99Q.png' style='position:absolute; top:0; left:140px; height:300px;' />\n  <img id='seconds' src='https://i.imgur.com/m2PQs6E.png' style='position:absolute; top:0; left:145px; height:300px;' />\n</div>",
       "width": 300,
       "height": 300,
