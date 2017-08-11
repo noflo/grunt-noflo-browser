@@ -71,19 +71,13 @@ Whether to build also the development dependencies.
 Type: `Boolean`
 Default value: `false`
 
-Whether to enable debugging using Flowhub over WebRTC. Requires `noflo-runtime-webrtc` module to be installed.
+Whether to enable debugging using Flowhub over `postMessage` transport. Requires `noflo-runtime-postmessage` module to be installed.
 
 ### options.ide
 Type: `String`
 Default value: `https://app.flowhub.io`
 
 Which IDE instance to use for live-mode debugging url.
-
-### options.signalserver
-Type: `String`
-Default value: `https://api.flowhub.io`
-
-Which WebRTC signalling server to use for debugging.
 
 ### Usage Examples
 
