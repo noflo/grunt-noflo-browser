@@ -1,5 +1,7 @@
 var fbpManifest = require('fbp-manifest');
 var path = require('path');
+var bluebird = require('bluebird');
+var fs = require('fs');
 
 var filterDependencies = function(modules, options, callback) {
   if (options.graph) {
@@ -23,10 +25,11 @@ var filterDependencies = function(modules, options, callback) {
   }
 };
 
-var serialize = function(modules, options) {
+var serialize = function(modules, options, callback) {
   var loaders = [];
-  var lines = [];
+  var components = [];
   var indent = '    ';
+  sources = '{};';
   modules.forEach(function (module) {
     if (module.noflo && module.noflo.loader) {
       var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
@@ -36,16 +39,53 @@ var serialize = function(modules, options) {
       return;
     }
     module.components.forEach(function (component) {
-      var fullname = module.name ? module.name + "/" + component.name : component.name;
+      var moduleName = module.name ? '"' + module.name + '"' : 'null';
       var componentPath = path.resolve(options.baseDir, component.path);
-      lines.push(indent + "'" + fullname + "': require(" + JSON.stringify(componentPath) + ")");
+      components.push("  loader.registerComponent(" + moduleName + ', "' + component.name + '", require(' + JSON.stringify(componentPath) + '))');
     });
   });
   var contents = {
-    components: "{\n" + (lines.join(',\n')) + "\n  };",
+    sources: sources,
+    components: components.join(',\n'),
     loaders: "[\n" + (loaders.join(',\n')) + "\n  ];"
   };
-  return contents;
+  if (!options.debug) {
+    // Non-debug build, don't bundle component sources
+    callback(null, contents);
+    return;
+  }
+  var sources = [];
+  var readFile = bluebird.promisify(fs.readFile);
+  bluebird.map(modules, function (module) {
+    if (!module.components) {
+      return bluebird.resolve(null);
+    }
+    return bluebird.map(module.components, function (component) {
+      if (!component.elementary) {
+        return bluebird.resolve(null);
+      }
+      var sourcePath = path.resolve(options.baseDir, component.path);
+      return readFile(sourcePath, 'utf-8')
+      .then(function (source) {
+        var language = 'javascript';
+        if (path.extname(sourcePath) === '.coffee') {
+          language = 'coffeescript';
+        }
+        var fullName = module.name ? module.name + '/' + component.name : component.name;
+        sources.push('  "' + fullName + '": ' + JSON.stringify({
+          language: language,
+          source: source
+        }));
+        return Promise.resolve(null);
+      });
+    });
+  }).nodeify(function (err) {
+    if (err) {
+      return callback(err);
+    }
+    contents.sources = "{\n" + (sources.join(',\n')) + "\n};"
+    callback(null, contents);
+  });
 };
 
 exports.discover = function (options, callback) {
@@ -58,8 +98,7 @@ exports.discover = function (options, callback) {
       if (err) {
         return callback(err);
       }
-      var contents = serialize(modules, options);
-      callback(err, contents);
+      serialize(modules, options, callback);
     });
   });
   return;

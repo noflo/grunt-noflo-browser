@@ -38,6 +38,22 @@ describe('A browser-built module', function () {
       ins.disconnect();
     });
     describe('getSource', function () {
+      var repeatSource = null;
+      before(function (done) {
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState !== 4) {
+            return;
+          }
+          if (xhr.status !== 200) {
+            return done(new Error("Responded with " + xhr.status));
+          }
+          repeatSource = xhr.responseText;
+          done();
+        }
+        xhr.open('GET', './fixtures/node_modules/noflo-core/components/Repeat.coffee', true);
+        xhr.send(null);
+      });
       it('should be able to read sources for elementary component', function (done) {
         var loader = new noflo.ComponentLoader('');
         loader.getSource('core/Repeat', function (err, c) {
@@ -46,8 +62,8 @@ describe('A browser-built module', function () {
           }
           chai.expect(c.library).to.equal('core');
           chai.expect(c.name).to.equal('Repeat');
-          chai.expect(c.language).to.equal('javascript');
-          chai.expect(c.code).to.contain('noflo.Component');
+          chai.expect(c.language).to.equal('coffeescript');
+          chai.expect(c.code).to.equal(repeatSource);
           done();
         });
       });
@@ -124,7 +140,7 @@ describe('A browser-built module', function () {
           chai.expect(c.library).to.equal('bar');
           chai.expect(c.name).to.equal('AddOne');
           chai.expect(c.language).to.equal('javascript');
-          chai.expect(c.code).to.contain('noflo.Component');
+          chai.expect(c.code).to.equal(source);
           done();
         });
       });
