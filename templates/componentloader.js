@@ -11,7 +11,7 @@ var registerCustomLoaders = function (loader, loaders, callback) {
   });
 };
 
-var sources = <%= sources %>;
+var sources = <%= sources %>
 
 exports.setSource = function (loader, packageId, name, source, language, callback) {
   var implementation;

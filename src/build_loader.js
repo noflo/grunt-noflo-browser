@@ -29,7 +29,7 @@ var serialize = function(modules, options, callback) {
   var loaders = [];
   var components = [];
   var indent = '    ';
-  sources = '{}';
+  sources = '{};';
   modules.forEach(function (module) {
     if (module.noflo && module.noflo.loader) {
       var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
@@ -72,7 +72,7 @@ var serialize = function(modules, options, callback) {
           language = 'coffeescript';
         }
         var fullName = module.name ? module.name + '/' + component.name : component.name;
-        sources.push(indent + '"' + fullName + '": ' + JSON.stringify({
+        sources.push('  "' + fullName + '": ' + JSON.stringify({
           language: language,
           source: source
         }));
