@@ -1,5 +1,7 @@
 var fbpManifest = require('fbp-manifest');
 var path = require('path');
+var bluebird = require('bluebird');
+var fs = require('fs');
 
 var filterDependencies = function(modules, options, callback) {
   if (options.graph) {
@@ -27,6 +29,7 @@ var serialize = function(modules, options, callback) {
   var loaders = [];
   var components = [];
   var indent = '    ';
+  sources = '{}';
   modules.forEach(function (module) {
     if (module.noflo && module.noflo.loader) {
       var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
@@ -42,10 +45,47 @@ var serialize = function(modules, options, callback) {
     });
   });
   var contents = {
+    sources: sources,
     components: components.join(',\n'),
     loaders: "[\n" + (loaders.join(',\n')) + "\n  ];"
   };
-  callback(null, contents);
+  if (!options.debug) {
+    // Non-debug build, don't bundle component sources
+    callback(null, contents);
+    return;
+  }
+  var sources = [];
+  var readFile = bluebird.promisify(fs.readFile);
+  bluebird.map(modules, function (module) {
+    if (!module.components) {
+      return bluebird.resolve(null);
+    }
+    return bluebird.map(module.components, function (component) {
+      if (!component.elementary) {
+        return bluebird.resolve(null);
+      }
+      var sourcePath = path.resolve(options.baseDir, component.path);
+      return readFile(sourcePath, 'utf-8')
+      .then(function (source) {
+        var language = 'javascript';
+        if (path.extname(sourcePath) === '.coffee') {
+          language = 'coffeescript';
+        }
+        var fullName = module.name ? module.name + '/' + component.name : component.name;
+        sources.push(indent + '"' + fullName + '": ' + JSON.stringify({
+          language: language,
+          source: source
+        }));
+        return Promise.resolve(null);
+      });
+    });
+  }).nodeify(function (err) {
+    if (err) {
+      return callback(err);
+    }
+    contents.sources = "{\n" + (sources.join(',\n')) + "\n};"
+    callback(null, contents);
+  });
 };
 
 exports.discover = function (options, callback) {
