@@ -124,7 +124,7 @@ describe('A browser-built module', function () {
           chai.expect(c.library).to.equal('bar');
           chai.expect(c.name).to.equal('AddOne');
           chai.expect(c.language).to.equal('javascript');
-          chai.expect(c.code).to.contain('noflo.Component');
+          chai.expect(c.code).to.equal(source);
           done();
         });
       });

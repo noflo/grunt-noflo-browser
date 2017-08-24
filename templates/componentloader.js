@@ -11,8 +11,11 @@ var registerCustomLoaders = function (loader, loaders, callback) {
   });
 };
 
+var sources = {};
+
 exports.setSource = function (loader, packageId, name, source, language, callback) {
   var implementation;
+  var originalSource = source;
   // Transpiling
   if (language === 'coffeescript') {
     if (!window.CoffeeScript) {
@@ -48,6 +51,12 @@ exports.setSource = function (loader, packageId, name, source, language, callbac
     return callback(new Error('Provided source failed to create a runnable component'));
   }
 
+  var fullName = packageId + '/' + name;
+  sources[fullName] = {
+    language: language,
+    source: originalSource
+  };
+
   loader.registerComponent(packageId, name, implementation, callback);
 };
 
@@ -64,6 +73,10 @@ exports.getSource = function (loader, name, callback) {
   if (loader.isGraph(component)) {
     componentData.code = JSON.stringify(component, null, 2);
     componentData.language = 'json';
+    return callback(null, componentData);
+  } else if (sources[name]) {
+    componentData.code = sources[name].source;
+    componentData.language = sources[name].language;
     return callback(null, componentData);
   } else if (typeof component === 'function') {
     componentData.code = component.toString();
