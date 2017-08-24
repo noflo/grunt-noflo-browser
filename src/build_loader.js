@@ -23,9 +23,9 @@ var filterDependencies = function(modules, options, callback) {
   }
 };
 
-var serialize = function(modules, options) {
+var serialize = function(modules, options, callback) {
   var loaders = [];
-  var lines = [];
+  var components = [];
   var indent = '    ';
   modules.forEach(function (module) {
     if (module.noflo && module.noflo.loader) {
@@ -36,16 +36,16 @@ var serialize = function(modules, options) {
       return;
     }
     module.components.forEach(function (component) {
-      var fullname = module.name ? module.name + "/" + component.name : component.name;
+      var moduleName = module.name ? '"' + module.name + '"' : 'null';
       var componentPath = path.resolve(options.baseDir, component.path);
-      lines.push(indent + "'" + fullname + "': require(" + JSON.stringify(componentPath) + ")");
+      components.push("  loader.registerComponent(" + moduleName + ', "' + component.name + '", require(' + JSON.stringify(componentPath) + '))');
     });
   });
   var contents = {
-    components: "{\n" + (lines.join(',\n')) + "\n  };",
+    components: components.join(',\n'),
     loaders: "[\n" + (loaders.join(',\n')) + "\n  ];"
   };
-  return contents;
+  callback(null, contents);
 };
 
 exports.discover = function (options, callback) {
@@ -58,8 +58,7 @@ exports.discover = function (options, callback) {
       if (err) {
         return callback(err);
       }
-      var contents = serialize(modules, options);
-      callback(err, contents);
+      serialize(modules, options, callback);
     });
   });
   return;
