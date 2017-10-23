@@ -28,9 +28,13 @@ var filterDependencies = function(modules, options, callback) {
 var serialize = function(modules, options, callback) {
   var loaders = [];
   var components = [];
+  var icons = [];
   var indent = '    ';
   sources = '{};';
   modules.forEach(function (module) {
+    if (module.icon) {
+      icons.push("  loader.setLibraryIcon('" + module.name + "', '" + module.icon + "')");
+    }
     if (module.noflo && module.noflo.loader) {
       var loaderPath = path.resolve(options.baseDir, module.base, module.noflo.loader);
       loaders.push(indent + "require(" + JSON.stringify(loaderPath) + ")");
@@ -46,7 +50,8 @@ var serialize = function(modules, options, callback) {
   });
   var contents = {
     sources: sources,
-    components: components.join(',\n'),
+    components: components.join(';\n'),
+    icons: icons.join(';\n'),
     loaders: "[\n" + (loaders.join(',\n')) + "\n  ];"
   };
   if (!options.debug) {

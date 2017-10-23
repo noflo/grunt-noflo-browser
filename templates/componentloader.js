@@ -92,6 +92,7 @@ exports.getSource = function (loader, name, callback) {
 
 exports.register = function (loader, callback) {
   var loaders = <%= loaders %>
+<%= icons %>
 <%= components %>
   if (!loaders.length) {
     return callback();
