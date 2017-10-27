@@ -29,7 +29,7 @@ exports.configure = function (options) {
 
   // Inject noflo-component-loader
   config.module.rules.push({
-    test: /noflo\/lib\/loader\/register.js$/,
+    test: /noflo([\\]+|\/)lib([\\]+|\/)loader([\\]+|\/)register.js$/,
     use: [
       {
         loader: 'noflo-component-loader',
