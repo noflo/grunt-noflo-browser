@@ -39,7 +39,6 @@
     "grunt-contrib-jshint": "^1.1.0",
     "grunt-exec": "^1.0.0",
     "grunt-mocha-phantomjs": "^4.0.0",
-    "grunt-noflo-manifest": "^0.1.12",
     "mocha": "^4.0.0"
   },
   "peerDependencies": {
