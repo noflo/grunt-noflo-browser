@@ -14,11 +14,11 @@
   },
   "dependencies": {
     "noflo": "0.x >= 0.8",
-    "noflo-math": "^0.0.8",
-    "noflo-core": "^0.2.3",
-    "noflo-objects": "^0.1.14",
-    "noflo-dom": "^0.1.1",
-    "noflo-css": "^0.0.2"
+    "noflo-math": "^0.2.0",
+    "noflo-core": "^0.4.0",
+    "noflo-objects": "^0.3.0",
+    "noflo-dom": "^0.2.0",
+    "noflo-css": "^0.1.0"
   },
   "devDependencies": {
     "noflo-runtime-postmessage": "^0.8.0"
