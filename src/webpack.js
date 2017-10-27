@@ -22,17 +22,26 @@ exports.configure = function (options) {
     config.plugins = [];
   }
 
-  // Custom component loader for this build
-  config.plugins.push(
-    new webpack.NormalModuleReplacementPlugin(
-      /\.\/loader\/register/,
-      require.resolve(options.loaderPath)
-    )
-  );
-
   // Configurable ignores
   options.ignores.forEach(function (ignore) {
     config.plugins.push(new webpack.IgnorePlugin(ignore));
+  });
+
+  // Inject noflo-component-loader
+  config.module.rules.push({
+    test: /noflo([\\]+|\/)lib([\\]+|\/)loader([\\]+|\/)register.js$/,
+    use: [
+      {
+        loader: 'noflo-component-loader',
+        options: {
+          graph: options.graph,
+          debug: options.debug,
+          baseDir: options.baseDir,
+          manifest: options.manifest,
+          runtimes: options.runtimes,
+        }
+      }
+    ]
   });
 
   config.output = {

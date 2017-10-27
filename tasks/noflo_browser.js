@@ -11,7 +11,6 @@
 var path = require('path');
 var webpack = require('../src/webpack');
 var createDemos = require('../src/create_demos');
-var buildLoader = require('../src/build_loader');
 var bluebird = require('bluebird');
 var clone = require('clone');
 
@@ -130,11 +129,6 @@ module.exports = function(grunt) {
             fileOptions.runtimes.push('noflo-browser');
           }
 
-          var discover = bluebird.promisify(buildLoader.discover);
-          return discover(fileOptions);
-        }).then(function (components) {
-          fileOptions.loaderPath = buildLoader.save(components, grunt, fileOptions);
-
           var config = webpack.configure(fileOptions);
 
           grunt.log.debug('Generated webpack configuration:');
@@ -142,7 +136,6 @@ module.exports = function(grunt) {
 
           return bluebird.promisify(webpack.run)(config);
         }).then(function () {
-          grunt.file.delete(fileOptions.loaderPath);
           if (fileOptions.generatedEntry) {
             grunt.file.delete(fileOptions.webpack.entry);
           }
