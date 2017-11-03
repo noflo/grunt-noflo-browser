@@ -26,9 +26,27 @@ module.exports = function(grunt) {
         module: {
           rules: [
             {
+              test: /noflo([\\]+|\/)lib([\\]+|\/)(.*)\.js$|noflo([\\]+|\/)components([\\]+|\/)(.*)\.js$|fbp-graph([\\]+|\/)lib([\\]+|\/)(.*)\.js$/,
+              use: [
+                {
+                  loader: 'babel-loader',
+                  options: {
+                    presets: ['es2015']
+                  }
+                }
+              ]
+            },
+            {
               test: /\.coffee$/,
               use: [
-                "coffee-loader"
+                {
+                  loader: 'coffee-loader',
+                  options: {
+                    transpile: {
+                      presets: ['es2015']
+                    }
+                  }
+                }
               ]
             },
             {
@@ -44,7 +62,9 @@ module.exports = function(grunt) {
         },
         entry: null,
         target: 'web',
-        externals: {},
+        externals: {
+          temp: 'commonjs temp'
+        },
         plugins: []
       },
       // Modules that should be completely ignored
