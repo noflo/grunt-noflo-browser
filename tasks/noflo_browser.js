@@ -63,6 +63,7 @@ module.exports = function(grunt) {
         entry: null,
         target: 'web',
         mode: 'development',
+        devtool: 'source-map',
         externals: {
           temp: 'commonjs temp'
         },
