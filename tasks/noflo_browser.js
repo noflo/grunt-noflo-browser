@@ -62,6 +62,7 @@ module.exports = function(grunt) {
         },
         entry: null,
         target: 'web',
+        mode: 'development',
         externals: {
           temp: 'commonjs temp'
         },
