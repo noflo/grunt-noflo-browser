@@ -39,9 +39,10 @@ var serialize = function (module, options, grunt, callback) {
   module.components.forEach(function (graphComponent) {
     var graphPath = path.resolve(modulePath, graphComponent.path);
     var graph = grunt.file.readJSON(graphPath);
-    if (!graph.properties || !graph.properties.environment || !graph.properties.environment.content) {
-      // No HTML demo definition
-      return;
+    var content = '';
+
+    if (graph.properties && graph.properties.environment && graph.properties.environment.content) {
+      content = graph.properties.environment.content;
     }
     var templateData = {
       name: graphComponent.name,
@@ -51,7 +52,7 @@ var serialize = function (module, options, grunt, callback) {
       signalServer: options.signalserver,
       noflo: options.destName + '.js',
       graphPath: module.name + '/' + graphComponent.name,
-      content: graph.properties.environment.content,
+      content: content,
       heads: options.heads
     };
     var templated = grunt.template.process(graphFileTemplate, {
