@@ -39,7 +39,7 @@
     "grunt": "^1.0.1",
     "grunt-contrib-clean": "^2.0.0",
     "grunt-contrib-connect": "^2.0.0",
-    "grunt-contrib-jshint": "^1.1.0",
+    "grunt-contrib-jshint": "^2.0.0",
     "grunt-exec": "^3.0.0",
     "grunt-mocha-phantomjs": "^4.0.0",
     "mocha": "^5.0.0"
