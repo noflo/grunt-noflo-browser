@@ -1,6 +1,6 @@
 language: node_js
 node_js:
-- 'lts/*'
+- lts/*
 before_script:
 - npm install -g grunt-cli
 script: grunt test
@@ -8,7 +8,7 @@ deploy:
   provider: npm
   email: henri.bergius@iki.fi
   api_key:
-    secure: hK/pYShzH17XcfbHeIg2McqAEPKpVbiklYjD5EuJUe9MTAnBAPC2VmZwjMTziqJiOcLGn3eFqHP4nPXXi9vo54bVB2SHvJZ/OWaDWS70k+cx69cu8B2+87BMKonOcGOdmi9awvt9GaOBMm4cWVOIeiQicVqhmFIc233l8fTG86c=
+    secure: UhGgIG0Rzu59agGfxGn92papWzR2DpqD252A5K4zoInfeWQitbv0zIPO/dldhQ6AMz5wTYnq0sgr5U9AcxlkhMcEQD34xAvfrJP5eCaXsVIoqtHMSQakTFzzi4a5kXoK63DklVqp4b1SNLwAtqX106tUjDAawmzCidwEDyzcBrI=
   on:
     tags: true
     repo: noflo/grunt-noflo-browser
