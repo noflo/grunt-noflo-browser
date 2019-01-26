@@ -31,7 +31,7 @@ module.exports = function(grunt) {
                 {
                   loader: 'babel-loader',
                   options: {
-                    presets: ['es2015']
+                    presets: ['@babel/preset-env'],
                   }
                 }
               ]
@@ -43,7 +43,7 @@ module.exports = function(grunt) {
                   loader: 'coffee-loader',
                   options: {
                     transpile: {
-                      presets: ['es2015']
+                      presets: ['@babel/preset-env'],
                     }
                   }
                 }
