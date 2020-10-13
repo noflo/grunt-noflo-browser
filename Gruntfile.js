@@ -60,24 +60,11 @@ module.exports = function(grunt) {
     },
 
     // End-to-End smoketests
-    connect: {
-      server: {
-        options: {
-          port: 8000
-        }
-      }
+    karma: {
+      unit: {
+        configFile: 'node_modules/noflo-webpack-config/karma.config.js',
+      },
     },
-    mocha_phantomjs: {
-      all: {
-        options: {
-          output: 'spec/result.xml',
-          reporter: 'spec',
-          urls: ['http://localhost:8000/spec/runner.html'],
-          failWithOutput: true
-        }
-      }
-    }
-
   });
 
   // Actually load this plugin's task(s).
@@ -87,12 +74,11 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-exec');
   grunt.loadNpmTasks('grunt-contrib-jshint');
   grunt.loadNpmTasks('grunt-contrib-clean');
-  grunt.loadNpmTasks('grunt-contrib-connect');
-  grunt.loadNpmTasks('grunt-mocha-phantomjs');
+  grunt.loadNpmTasks('grunt-karma');
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'noflo_browser_mocha', 'connect:server', 'mocha_phantomjs']);
+  grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'noflo_browser_mocha', 'karma']);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test']);
