@@ -1,8 +1,7 @@
 /node_modules/
 npm-debug.log
-/tmp/
-/tmp2/
-/spec/fixtures/node_modules
+/example/node_modules/
+/dist/
 /spec/runner.html
 /spec/result.xml
 *~

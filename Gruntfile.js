@@ -25,13 +25,13 @@ module.exports = function(grunt) {
 
     // Before generating any new files, remove any previously-created files.
     clean: {
-      tests: ['tmp', 'spec/fixtures/node_modules/'],
+      tests: ['dist', 'example/node_modules/'],
     },
 
     exec: {
       install_fixture_deps: {
         command: 'npm install',
-        cwd: 'spec/fixtures/'
+        cwd: 'example'
       }
     },
 
@@ -43,7 +43,7 @@ module.exports = function(grunt) {
           debug: true
         },
         files: {
-          'tmp/noflo.js': ['spec/fixtures/package.json']
+          'dist/noflo.js': ['example/package.json']
         }
       }
     },
@@ -51,7 +51,7 @@ module.exports = function(grunt) {
     noflo_browser_mocha: {
       all: {
         options: {
-          scripts: ["../tmp/noflo.js"]
+          scripts: ["../dist/noflo.js"]
         },
         files: {
           'spec/runner.html': ['spec/*.js']
@@ -76,7 +76,7 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-clean');
   grunt.loadNpmTasks('grunt-karma');
 
-  // Whenever the "test" task is run, first clean the "tmp" dir, then run this
+  // Whenever the "test" task is run, first clean the "dist" dir, then run this
   // plugin's task(s), then test the result.
   grunt.registerTask('test', ['clean', 'exec:install_fixture_deps', 'noflo_browser', 'noflo_browser_mocha', 'karma']);
 
