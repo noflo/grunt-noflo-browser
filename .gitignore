@@ -6,3 +6,4 @@ npm-debug.log
 /spec/runner.html
 /spec/result.xml
 *~
+package-lock.json
