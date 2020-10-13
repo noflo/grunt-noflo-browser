@@ -28,7 +28,7 @@ exports.configure = function (options) {
   });
 
   // Inject noflo-component-loader
-  config.module.rules.push({
+  config.module.rules[0] = {
     test: /noflo([\\]+|\/)lib([\\]+|\/)loader([\\]+|\/)register.js$/,
     use: [
       {
@@ -42,7 +42,7 @@ exports.configure = function (options) {
         }
       }
     ]
-  });
+  };
 
   config.output = {
     path: options.destDir,
@@ -52,12 +52,6 @@ exports.configure = function (options) {
   config.context = options.baseDir;
   config.entry = path.relative(options.baseDir, config.entry);
   config.entry = path.resolve(options.baseDir, config.entry);
-
-  if (config.target !== 'node' && !config.node) {
-    config.node = {
-      fs: 'empty'
-    };
-  }
 
   return config;
 };
@@ -69,15 +63,10 @@ exports.run = function (config, callback) {
     }
     var statsJson = stats.toJson();
     if (stats.hasErrors()) {
-      statsJson.errors.forEach(function (e) {
-        console.log(e);
-      });
+      console.log(stats.toString({
+        colors: true
+      }));
       return callback(new Error(statsJson.errors.length + ' errors building ' + config.entry));
-    }
-    if (stats.hasWarnings()) {
-      statsJson.warnings.forEach(function (w) {
-        console.log(w);
-      });
     }
     console.log(stats.toString({
       colors: true

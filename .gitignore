@@ -6,3 +6,5 @@ npm-debug.log
 /spec/result.xml
 *~
 package-lock.json
+.DS_Store
+fbp.json
