@@ -13,13 +13,14 @@ describe('IFRAME runtime', function () {
   };
   before(function (done) {
     this.timeout(10000);
-    var fixtureContainer = document.getElementById('fixtures');
+    var fixtureContainer = document.createElement('div');
+    document.body.appendChild(fixtureContainer);
     if (!fixtureContainer) {
       return done(new Error('Fixture container not found'));
     }
     var iframeElement = document.createElement('iframe');
     iframeElement.sandbox = 'allow-scripts';
-    iframeElement.src = '../tmp/Clock.html?fbp_noload=true&fbp_protocol=iframe';
+    iframeElement.src = '/base/dist/Clock.html?fbp_noload=true&fbp_protocol=iframe';
     iframeElement.onload = function () {
       iframe = iframeElement.contentWindow;
       setTimeout(function () {
