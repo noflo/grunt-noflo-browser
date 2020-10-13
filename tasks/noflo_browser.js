@@ -10,6 +10,7 @@
 
 var path = require('path');
 var webpack = require('../src/webpack');
+var baseConfig = require('../node_modules/noflo-webpack-config/webpack.config.js');
 var createDemos = require('../src/create_demos');
 var bluebird = require('bluebird');
 var clone = require('clone');
@@ -22,51 +23,7 @@ module.exports = function(grunt) {
       // Provide a graph component name to scope the build only to include its dependencies
       graph: null,
       // Default options for WebPack
-      webpack: {
-        module: {
-          rules: [
-            {
-              test: /noflo([\\]+|\/)lib([\\]+|\/)(.*)\.js$|noflo([\\]+|\/)components([\\]+|\/)(.*)\.js$|fbp-graph([\\]+|\/)lib([\\]+|\/)(.*)\.js$|noflo-runtime-([a-z]+)([\\]+|\/)(.*).js$/,
-              use: [
-                {
-                  loader: 'babel-loader',
-                  options: {
-                    presets: ['@babel/preset-env'],
-                  }
-                }
-              ]
-            },
-            {
-              test: /\.coffee$/,
-              use: [
-                {
-                  loader: 'coffee-loader',
-                  options: {
-                    transpile: {
-                      presets: ['@babel/preset-env'],
-                    }
-                  }
-                }
-              ]
-            },
-            {
-              test: /\.fbp$/,
-              use: [
-                "fbp-loader"
-              ]
-            }
-          ],
-        },
-        resolve: {
-          extensions: [".coffee", ".js"],
-        },
-        entry: null,
-        target: 'web',
-        externals: {
-          temp: 'commonjs temp'
-        },
-        plugins: []
-      },
+      webpack: baseConfig,
       // Modules that should be completely ignored
       ignores: [
         /tv4/
