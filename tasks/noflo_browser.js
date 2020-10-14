@@ -10,7 +10,7 @@
 
 var path = require('path');
 var webpack = require('../src/webpack');
-var baseConfig = require('../node_modules/noflo-webpack-config/webpack.config.js');
+var baseConfig = require('noflo-webpack-config');
 var createDemos = require('../src/create_demos');
 var bluebird = require('bluebird');
 var clone = require('clone');
