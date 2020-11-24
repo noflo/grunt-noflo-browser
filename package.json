@@ -31,7 +31,7 @@
     "coffee-loader": "^1.0.1",
     "coffeescript": "^2.0.2",
     "fbp-loader": "^0.1.1",
-    "noflo-component-loader": "^0.3.0",
+    "noflo-component-loader": "^0.4.0",
     "noflo-runtime-headless": "^0.2.0",
     "noflo-webpack-config": "^2.0.2",
     "path-browserify": "^1.0.1",
